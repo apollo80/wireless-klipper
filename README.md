@@ -1,5 +1,5 @@
 # wireless-klipper
-Firmware for MKS Robin WiFi (esp8266) - organizing a `klipper &lt;-> wifi &lt;-> mcu` bridge.
+Firmware for MKS Robin WiFi (esp8266) - organizing a `klipper <-> wifi <-> mcu` bridge.
 
 ## Source
 The firmware source code for esp8266 ([Arduino IDE](https://www.arduino.cc/en/software)) is located in the [wireless_klipper_sta](wireless_klipper_sta) directory.
