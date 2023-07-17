@@ -1,0 +1,21 @@
+[Unit]
+Description=Transport for klipper 3D Printer %i
+Documentation=https://www.klipper3d.org/
+After=network-online.target
+Wants=udev.target
+Before=klipper@%i.service 
+
+[Service]
+Type=simple
+User=klipper
+WorkingDirectory=/home/klipper
+EnvironmentFile=/home/klipper/printer_%i_data/systemd/socat.env
+ExecStart=socat $SOCAT_ARGS
+StandardOutput=file:/home/klipper/printer_%i_data/logs/socat.out.log
+StandardError=file:/home/klipper/printer_%i_data/logs/socat.err.log
+Restart=always
+RestartSec=0
+
+[Install]
+WantedBy=printer@%i.target
+

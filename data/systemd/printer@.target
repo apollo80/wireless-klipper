@@ -1,0 +1,7 @@
+[Unit]
+Description=Start Klipper fo 3D printer %i
+Documentation=man:systemd.special(7)
+StopWhenUnneeded=yes
+
+[Install]
+WantedBy=multi-user.target

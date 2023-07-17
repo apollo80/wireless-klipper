@@ -1,0 +1,20 @@
+[Unit]
+Description=Klipper 3D Printer Firmware %i
+Documentation=https://www.klipper3d.org/
+After=network-online.target socat@%i.service
+Wants=udev.target socat@%i.service
+Before=moonraker@%i.service
+
+[Service]
+Type=simple
+User=klipper
+#RemainAfterExit=yes
+WorkingDirectory=/home/klipper/klipper
+EnvironmentFile=/home/klipper/printer_%i_data/systemd/klipper.env
+ExecStart=/home/klipper/.klippy-env/bin/python $KLIPPER_ARGS
+Restart=always
+RestartSec=10
+
+[Install]
+#WantedBy=multi-user.target
+WantedBy=printer@%i.target
