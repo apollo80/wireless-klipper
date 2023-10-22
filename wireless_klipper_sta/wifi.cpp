@@ -34,9 +34,11 @@ void init_wifi()
      */
     WiFi.setSleepMode(WIFI_NONE_SLEEP);
     WiFi.setPhyMode(WIFI_PHY_MODE_11N);
-    WiFi.mode(WIFI_STA);
+    WiFi.mode(moduleSettings.wifi_use_sta ? WIFI_STA : WIFI_AP);
+
     WiFi.setAutoConnect(true);
     WiFi.setAutoReconnect(true);
+    WiFi.persistent(true);
 
     if (moduleSettings.wifi_hostname[0])
     {

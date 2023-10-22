@@ -73,6 +73,9 @@ bool handle_tcp2serial()
         if(!existClient_tcp2serial)
         {
             tcpClient = tcpServer.accept();
+            tcpClient.setNoDelay(true);
+            tcpClient.keepAlive(1, 1, 3);
+
             existClient_tcp2serial = true;
 
 #if ENABLE_DEBUG

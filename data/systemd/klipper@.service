@@ -1,8 +1,8 @@
 [Unit]
 Description=Klipper 3D Printer Firmware %i
 Documentation=https://www.klipper3d.org/
-After=network-online.target socat@%i.service
-Wants=udev.target socat@%i.service
+After=network-online.target
+Wants=udev.target
 Before=moonraker@%i.service
 
 [Service]

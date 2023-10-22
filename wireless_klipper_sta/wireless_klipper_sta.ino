@@ -11,13 +11,13 @@
 #include "wireless_klipper_sta.h"
 
 /// @brief firmware_version
-version_t firmware_version = { 0, 0, 2, 1 };
+version_t firmware_version = { 0, 0, 2, 3 };
 
 /// @brief default configuration
 struct settings_t moduleSettings
 {
     /// @brief firmware version
-    .version = { 0, 0, 2, 1 },
+    .version = { 0, 0, 2, 3 },
 
     /// @brief wifi point name
     "esp8266",
@@ -95,11 +95,10 @@ void setup()
 // the loop function runs over and over again forever
 void loop()
 {
-    wifi_update();
-
     bool existClient_tcp2serial = handle_tcp2serial();
     if(!existClient_tcp2serial)
     {
+        wifi_update();
         handle_httpServer();
     }
 }
