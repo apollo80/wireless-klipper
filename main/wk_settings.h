@@ -7,48 +7,54 @@
  */
 
 #pragma once
-#ifndef __wireless_klipper_sta__settings_h__
-#define __wireless_klipper_sta__settings_h__
+#ifndef __wireless_klipper__settings_h__
+#define __wireless_klipper__settings_h__
 
-#include "version.h"
+#include "wk_version.h"
+
+#include "freertos/FreeRTOS.h"
+#include "driver/uart.h"
+#include "esp_wifi_types.h"
 
 
 /* * * * * * * 
- * EEPROM settings
+ * Module settings
  */
 struct settings_t
 {
     /// @brief firmware version
-    version_t version;
-
+    union {
+        version_t ver;
+        uint32_t  raw;
+    } version;
 
     /// @brief wifi point name
-    char wifi_hostname[36];
+    char wifi_hostname[32];
 
     /// @brief wifi SSID
-    char wifi_ssid[36];
+    char wifi_ssid[32];
 
     /// @brief wifi password
-    char wifi_password[36];
+    char wifi_password[64];
 
     /// @brief wifi mode
     bool wifi_use_sta;
 
 
     /// @brief speed of serial port
-    uint32_t serialPort_baud;
+    uint32_t uart_baud_rate;
 
     /// @brief serial port buffer size for receiving data
-    uint16_t serialPort_rxBuffSize;
+    size_t uart_rx_buffer_size;
 
 
     /// @brief port of tcp2serial server
-    uint16_t tcpServer_port;
+    uint16_t net_port;
 
     // buffer size for receiving/transmitting data
-    uint16_t tcpServer_buffSize;
+    size_t net_rx_buffer_size;
 
-
+/*
     /// @brief Sign of using static network addressing
     bool use_static_ip;
 
@@ -60,10 +66,17 @@ struct settings_t
 
     /// @brief gateway address when using static addressing
     uint8_t static_gateway[4];
+*/
 };
 
+/// @brief 
+/// @return
+struct settings_t* app_config();
 
-/// @brief default configuration
-extern struct settings_t moduleSettings;
+/// @brief 
+void app_config_read();
+
+/// @brief 
+void app_config_write();
 
 #endif // __wireless_klipper_sta__settings_h__

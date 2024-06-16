@@ -32,11 +32,11 @@ BinPackParameters: true
 BitFieldColonSpacing: Both
 BraceWrapping:
   AfterCaseLabel: false
-  AfterClass: false
+  AfterClass: true
   AfterControlStatement: Never
   AfterEnum: false
-  AfterFunction: false
-  AfterNamespace: false
+  AfterFunction: true
+  AfterNamespace: true
   AfterObjCDeclaration: false
   AfterStruct: false
   AfterUnion: false
@@ -51,7 +51,7 @@ BraceWrapping:
   SplitEmptyNamespace: true
 BreakAfterJavaFieldAnnotations: false
 BreakBeforeBinaryOperators: NonAssignment
-BreakBeforeBraces: Attach
+BreakBeforeBraces: Custom
 BreakBeforeConceptDeclarations: false
 BreakBeforeInheritanceComma: false
 BreakBeforeTernaryOperators: true

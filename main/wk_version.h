@@ -7,8 +7,8 @@
  */
 
 #pragma once
-#ifndef __wireless_klipper_sta__version_h__
-#define __wireless_klipper_sta__version_h__
+#ifndef __wireless_klipper__version_h__
+#define __wireless_klipper__version_h__
 
 #include <stdint.h>
 
@@ -22,6 +22,6 @@ typedef struct
 
 
 /// @brief firmware_version
-extern version_t firmware_version;
+extern const version_t firmware_version;
 
 #endif // __wireless_klipper_sta__version_h__

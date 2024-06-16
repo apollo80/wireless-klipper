@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os,sys
+#print("PYTHONPATH={}".format(sys.path))
 import rcssmin
 
 out_file_prefix = '''/*
@@ -14,11 +15,14 @@ out_file_prefix = '''/*
  */
 
 
+#undef  ICACHE_RODATA_ATTR
+#define ICACHE_RODATA_ATTR  __attribute__((section(".irom.text")))
+
 '''
 
 def convert(in_filename, out_filename):
     py_cssmin = rcssmin._make_cssmin(python_only=True)
-    outfile_cpp = open(out_filename + ".h", 'w')
+    outfile_cpp = open(out_filename + ".c", 'w')
     outfile_cpp.write(out_file_prefix)
 
     with open(in_filename, 'r') as infile:
@@ -30,7 +34,7 @@ def convert(in_filename, out_filename):
                     cppLine += "\";\n"
                     outfile_cpp.write(cppLine);
 
-                cppLine = "const char html_" + block_name + "[] PROGMEM = \""
+                cppLine = "const char html_" + block_name + "[] ICACHE_RODATA_ATTR = \""
             else:
                 cppLine += py_cssmin(line).replace("\"", "\\\"");
 
