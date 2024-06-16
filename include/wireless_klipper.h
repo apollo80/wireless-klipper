@@ -7,15 +7,15 @@
  */
 
 #pragma once
-#ifndef __wireless_klipper_sta_h__
-#define __wireless_klipper_sta_h__
+#ifndef __wireless_klipper_h__
+#define __wireless_klipper_h__
 
 #include "settings.h"
 #include <Esp.h>
 
-
-#define ENABLE_DEBUG 0
-
+#if defined(DEBUG_ESP_PORT)
+#define ENABLE_DEBUG 1
+#endif
 
 /* * * * * * *
  * WiFi functions
@@ -24,7 +24,7 @@
 void init_wifi();
 
 /// @brief
-void wifi_update();
+void wifi_update(bool existClient);
 
 
 /* * * * * * *
@@ -64,8 +64,8 @@ void write_settings(settings_t& cfg);
  */
 
 #if ENABLE_DEBUG
-void printClientStatus();
-void printClientIP();
+// void printClientStatus();
+// void printClientIP();
 void printModuleSettings(settings_t& cfg);
 #endif
 

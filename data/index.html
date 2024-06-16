@@ -48,7 +48,7 @@ body {
 }
 
 .tabs .tab-header > div {
-  width:calc(100%/2);
+  width:calc(100%/3);
   text-align: center;
   color: #888;
   font-weight: 700;
@@ -69,7 +69,7 @@ body {
 
 .tabs .tab-indicator {
   position: relative;
-  width:calc(100%/2);
+  width:calc(100%/3);
   height: 5px;
   background: #00acee;
   left: 0px;
@@ -115,7 +115,8 @@ body {
   margin: 5px;
 }
 
-.tabs .tab-button .button-blue {
+/* .tabs .tab-button .button-blue  { */
+.button-blue {
   position: relative;
   width: calc(100% - 10px);
   border: 2px #fbfbfb solid;
@@ -130,7 +131,8 @@ body {
   border-radius: 5px;
 }
 
-.tabs .tab-button .button-blue:hover {
+/* .tabs .tab-button .button-blue:hover { */
+ .button-blue:hover {
   background-color: #99ddff;
   color: #0493bd;
 }
@@ -245,6 +247,31 @@ body {
 .toggle input:checked~.labels::before {
   transform: translateX(var(--width))
 }
+
+.progress {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 400px;
+  height: 40px;
+  background-color: rgba(72,72,72,0.95);
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 5px 10px 5px #555;
+  padding: 5px;
+}
+
+.progress .upload-bar {
+  width: 10%;
+  height: 40px;
+  line-height: 40px;
+  background-color: green;
+  text-align: center;
+  vertical-align: middle;
+  border-radius: 5px;
+}
 </style>
 <script>
 function showPassword(field, button) {
@@ -287,7 +314,7 @@ function restart() {
   request.send("");
 }
 
-function sendData() {
+function saveConfig() {
   var form = document.form;
   var request  = new XMLHttpRequest();
   var params = encodeURI(
@@ -312,12 +339,49 @@ function sendData() {
  request.send(params);
 }
 
+
+function uploadProgressHandler(event) {
+  var percent = (event.loaded / event.total) * 100;
+  var el = document.getElementsByClassName("upload-bar")[0];
+  el.style.width = Math.round(percent) + "%";
+  el.innerHTML = Math.round(percent) + "%";
+}
+
+function uploadCompleteHandler(event) {
+  var el =   document.getElementsByClassName("upload-bar")[0];
+  el.style.width = '100%';
+  /* el.innerHTML = event.target.responseText; */
+  el.innerHTML = "100% - Complete";
+
+  setTimeout(function(){ location.reload(); }, 5000);
+}
+
+function uploadErrorHandler(event) {
+  var el =   document.getElementsByClassName("upload-bar")[0];
+  el.style.width = "100%";
+  el.innerHTML = "Upload Failed";
+}
+
+function uploadAbortHandler(event) {
+  var el =   document.getElementsByClassName("upload-bar")[0];
+  el.style.width = "100%";
+  el.innerHTML = "Upload Aborted";
+}
+
 function updateFirmware()
 {
+
   var input = document.createElement('input');
   input.type = 'file';
 
   input.onchange = e => {
+
+  var tabs = document.getElementsByClassName("tabs")[0];
+  tabs.style.display = "none";
+
+  var progress = document.getElementsByClassName("progress")[0];
+  progress.style.display = "inline";
+
     var file = e.target.files[0];
     var reader = new FileReader();
     reader.readAsArrayBuffer(file);
@@ -330,12 +394,19 @@ function updateFirmware()
       data.append('file', file);
 
       var request = new XMLHttpRequest();
-      request.open("POST", "/upload", true);
+
+      request.upload.addEventListener("progress", uploadProgressHandler, false);
+      request.addEventListener("load", uploadCompleteHandler, false);
+      request.addEventListener("error", uploadErrorHandler, false);
+      request.addEventListener("abort", uploadAbortHandler, false);
+
+      request.open("POST", "/update_self", true);
       request.send(data);
     };
   };
 
   input.click();
+
 }
 </script>
 
@@ -353,7 +424,10 @@ function updateFirmware()
         </div>
         <div>
             <i class="fa fa-code"></i>Tcp2Serial
-      </div>
+        </div>
+        <div>
+            <i class="fa fa-code"></i>Update
+        </div>
   </div>
 
   <div class="tab-indicator"></div>
@@ -470,12 +544,22 @@ function updateFirmware()
                max="65535"
                value="{{tcpServer_buffSize}}"/>
       </div>
+      <div>
+        <input type="button"
+               value="update self"
+               onClick="updateFirmware();"
+               class="button-blue"/>
+        <input type="button"
+               value="update mcu"
+               onClick="updateFirmware();"
+               class="button-blue"/>
+      </div>
     </form>
   </div>
   <div class="tab-button">
     <input type="button"
-           value="update config"
-           onClick="sendData();"
+           value="save config"
+           onClick="saveConfig();"
            class="button-blue"/>
     <input type="button"
            value="restart ESP8266"
@@ -483,6 +567,9 @@ function updateFirmware()
            class="button-blue"/>
   </div>
 </div>
+<div class="progress">
+  <div class="upload-bar">10%</div>
+<div>
 <!-- BODY_POST -->
 <script>
 let tabHeader = document.getElementsByClassName("tab-header")[0];
@@ -495,7 +582,7 @@ for(let idx = 0; idx < tabsPane.length; idx++) {
   tabsPane[idx].addEventListener("click", function(){
     tabHeader.getElementsByClassName("active")[0].classList.remove("active");
     tabsPane[idx].classList.add("active");
-    tabIndicator.style.left = `calc(calc(100% / 2) * ${idx})`;
+    tabIndicator.style.left = `calc(calc(100% / 3) * ${idx})`;
 
     tabBody.getElementsByClassName("active")[0].classList.remove("active");
     tabBody.getElementsByTagName("div")[idx].classList.add("active");

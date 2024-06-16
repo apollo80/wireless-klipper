@@ -7,8 +7,8 @@
  */
 
 #pragma once
-#ifndef __wireless_klipper_sta__settings_h__
-#define __wireless_klipper_sta__settings_h__
+#ifndef __wireless_klipper__settings_h__
+#define __wireless_klipper__settings_h__
 
 #include "version.h"
 
