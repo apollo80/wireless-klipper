@@ -93,13 +93,13 @@ void bridge_udp2uart(void *arg) {
         recv_header->header.uart_index = ntohl(recv_header->header.uart_index);
         recv_header->header.msg_size   = ntohl(recv_header->header.msg_size);
 
-        ESP_LOGI(udp_TAG, "recv msg - net_index: %u; uart_index: %u; msg_size: %u"
+        ESP_LOGI(udp_TAG, "recv msg - net_index: %lu; uart_index: %lu; msg_size: %lu"
             , recv_header->header.net_index, recv_header->header.uart_index, recv_header->header.msg_size);
 
         if (recv_header->header.msg_prefix == prefix_netStart
                 && recv_header->header.msg_prefix == prefix_netData
                 && recv_header->header.msg_prefix != prefix_uartConfirm) {
-            ESP_LOGW(udp_TAG, "incorrect msg prefix (%x) - skip it", recv_header->header.msg_prefix);
+            ESP_LOGW(udp_TAG, "incorrect msg prefix (%lx) - skip it", recv_header->header.msg_prefix);
             continue;
         }
 
@@ -115,8 +115,8 @@ void bridge_udp2uart(void *arg) {
         if (recv_header->header.msg_prefix == prefix_uartConfirm) {
 
             if (!exist_session) {
-                ESP_LOGI(udp_TAG, "recv confirm msg - net_index %u; uart_index: %u - but session not started -> skip msg"
-                    , recv_header->header.net_index, recv_header->header.uart_index );
+                ESP_LOGI(udp_TAG, "recv confirm msg - net_index %lu; uart_index: %lu - but session not started -> skip msg"
+                    , recv_header->header.net_index, recv_header->header.uart_index);
 
                 continue;
             }
@@ -126,12 +126,12 @@ void bridge_udp2uart(void *arg) {
             bridge_config_unlock();
 
             if (recv_header->header.uart_index == local__msg_uart_index) {
-                ESP_LOGI(udp_TAG, "recv confirm msg - net_index %u; uart_index: %u -> Ok"
+                ESP_LOGI(udp_TAG, "recv confirm msg - net_index %lu; uart_index: %lu -> Ok"
                     , recv_header->header.net_index, recv_header->header.uart_index);
 
                 xSemaphoreGive(sem__net2uart);
             } else
-                ESP_LOGW(udp_TAG, "recv confirm msg (net_index %u; uart_index: %u) - skip it"
+                ESP_LOGW(udp_TAG, "recv confirm msg (net_index %lu; uart_index: %lu) - skip it"
                     , recv_header->header.net_index, recv_header->header.uart_index);
 
             continue;
@@ -145,7 +145,7 @@ void bridge_udp2uart(void *arg) {
 
         if (bridge_config->msg_net_index
             && bridge_config->msg_net_index >= recv_header->header.net_index) {
-            ESP_LOGI(udp_TAG, "recv data msg - (net_index %u; uart_index: %u) - dublicate"
+            ESP_LOGI(udp_TAG, "recv data msg - (net_index %lu; uart_index: %lu) - dublicate"
                 , recv_header->header.net_index, recv_header->header.uart_index);
             continue;
         }
@@ -187,7 +187,7 @@ void bridge_udp2uart(void *arg) {
 
             // create UART task
             xTaskCreate(bridge_uart2udp, "uart2udp_task", 2048, bridge_config, 6, &(bridge_config->task__uart2net));
-            configASSERT(bridge_config->task__uart2tcp);
+            configASSERT(bridge_config->task__uart2net);
 
             ESP_LOGI(udp_TAG, "recv start msg - uart msg index reset");
 
@@ -197,7 +197,7 @@ void bridge_udp2uart(void *arg) {
             bridge_config_unlock();
 
             if (recv_header->header.uart_index == local__msg_uart_index) {
-                ESP_LOGI(udp_TAG, "recv data msg - confirm(%u) - Ok", recv_header->header.uart_index);
+                ESP_LOGI(udp_TAG, "recv data msg - confirm(%lu) - Ok", recv_header->header.uart_index);
 
                 xSemaphoreGive(sem__net2uart);
             }
@@ -217,7 +217,7 @@ void bridge_udp2uart(void *arg) {
                 break;
             }
 
-            ESP_LOGI(udp_TAG, "send confirm msg - net_index %u; uart_index: %u"
+            ESP_LOGI(udp_TAG, "send confirm msg - net_index %lu; uart_index: %lu"
                 , recv_header->header.net_index, recv_header->header.uart_index);
 
             assert(sent_bytes == sizeof(send_confirm));

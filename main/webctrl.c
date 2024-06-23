@@ -12,8 +12,12 @@
 
 #include <esp_http_server.h>
 #include <esp_ota_ops.h>
+#include <esp_log.h>
 #include <esp_system.h>
+
 #include <limits.h>
+#include <inttypes.h>
+
 
 #include "html.c"
 
@@ -121,7 +125,7 @@ esp_err_t webctrl_handler__update_self(httpd_req_t *http_req)
         ESP_ERROR_CHECK(httpd_resp_send(http_req, NULL, 0));
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x", update_partition->subtype, update_partition->address);
+    ESP_LOGI(TAG, "Writing to partition subtype %u at offset 0x%lx", update_partition->subtype, update_partition->address);
 
     esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
     if (err != ESP_OK) {
@@ -229,7 +233,7 @@ esp_err_t webctrl_handler__get_config(httpd_req_t *http_req)
         "\"static_netmask\":\"192.168.4.255\","
         "\"static_gateway\":\"192.168.4.1\","
         "\"uart_baud_rate_option\":[9600, 14400, 19200, 28800, 38400, 38400, 57600, 74880, 115200, 230400, 250000, 256000, 460800, 576000, 921600],"
-        "\"uart_baud_rate\":%u,"
+        "\"uart_baud_rate\":%lu,"
         "\"uart_rx_buffer_size\":%u,"
         "\"tcp_port\":%u,"
         "\"tcp_rx_buffer_size\":%u"
@@ -367,7 +371,7 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
             if (ret != ULONG_MAX) {
                 app_config()->uart_baud_rate = ret;
             }
-            ESP_LOGD(TAG, "    set 'uart_baud_rate' in '%i'", app_config()->uart_baud_rate);
+            ESP_LOGD(TAG, "    set 'uart_baud_rate' in '%lu'", app_config()->uart_baud_rate);
 
         } else if (0 == strncmp(key, "uart_rx_buffer_size", key_size)) {
             char *end_ptr = NULL;
@@ -416,7 +420,7 @@ esp_err_t webctrl_handler__restart(httpd_req_t *http_req)
     ESP_ERROR_CHECK(httpd_resp_send(http_req, NULL, 0));
 
     // FIXME: create task
-    vTaskDelay(500 / portTICK_RATE_MS);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
     esp_restart();
     return ESP_OK;
 }

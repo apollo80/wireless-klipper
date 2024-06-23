@@ -14,11 +14,12 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 #include <freertos/timers.h>
 
 #include <sys/cdefs.h>
 #include <lwip/sockets.h>
-#include <semphr.h>
+
 
 /// @brief 
 struct bridge_config_t {

@@ -9,6 +9,7 @@
 #include "wk_settings.h"
 
 #include <nvs_flash.h>
+#include <esp_log.h>
 
 
 /// @brief default configuration
@@ -24,16 +25,16 @@ struct settings_t moduleSettings = {
     }
 
     /// @brief wifi point name
-    , .wifi_hostname = "esp8266"
+    , .wifi_hostname = "esp23c2"
 
     /// @brief wifi mode
     , .wifi_use_sta = true
 
     /// @brief wifi SSID
-    , .wifi_ssid = "mks robin wifi"
+    , .wifi_ssid = "apollonetwork"    // , .wifi_ssid = "mks robin wifi"
 
     /// @brief wifi password
-    , .wifi_password = "password"
+    , .wifi_password = "vfnbkmlf"     // , .wifi_password = "password"
 
 
     /// @brief speed of serial port

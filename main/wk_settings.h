@@ -12,6 +12,7 @@
 
 #include "wk_version.h"
 
+#include <sdkconfig.h>
 #include "freertos/FreeRTOS.h"
 #include "driver/uart.h"
 #include "esp_wifi_types.h"

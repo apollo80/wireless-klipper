@@ -16,8 +16,8 @@
 void wifi_init();
 void wifi_blink_start();
 
-void mdns_start();
-void mdns_stop();
+// void mdns_start();
+// void mdns_stop();
 
 void tcp2uart_init();
 void tcp2uart_start();

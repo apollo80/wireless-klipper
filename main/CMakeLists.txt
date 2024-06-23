@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS
         app_main.c
-        mdns.c
+#        mdns.c
         webctrl.c
         wifi.c
         wk_bridge.c
@@ -14,12 +14,12 @@ idf_component_register(
 
     REQUIRES
         app_update
-        esp8266
+        driver
         esp_http_server
+        esp_wifi
         freertos
+        log
         lwip
         nvs_flash
-        mdns
         pthread
-        tcpip_adapter
         wpa_supplicant)

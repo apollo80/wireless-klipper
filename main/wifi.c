@@ -8,82 +8,99 @@
  */
 
 #include "wk_tasks.h"
+#include <sdkconfig.h>
 
 #include <string.h>
 #include <driver/gpio.h>
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
 #include <esp_log.h>
+#include <esp_mac.h>
 #include <esp_netif.h>
 #include <esp_event.h>
 #include <esp_wifi.h>
 
 
 static const char *TAG = "wk wifi";
-static wifi_init_config_t default_cfg = WIFI_INIT_CONFIG_DEFAULT();
 static wifi_config_t wifi_config;
+static esp_netif_t* wifi_sta_netif = NULL;
 static uint32_t s_retry_num = 0;
 
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void* /* event_data */) {
     assert(event_base == WIFI_EVENT);
+    uint8_t mac_addr[6];
 
     switch (event_id) {
-        case WIFI_EVENT_STA_START: {
+        case WIFI_EVENT_STA_START:
             esp_wifi_connect();
-        };
             break;
 
-        case WIFI_EVENT_STA_DISCONNECTED: {
+        case WIFI_EVENT_STA_DISCONNECTED:
             tcp2uart_stop(arg);
 
-            esp_wifi_connect();
+            esp_err_t err = esp_wifi_connect();
+            if (err != ESP_OK) {
+                ESP_LOGI(TAG, "esp_wifi_connect() return %i", err);
+                return;
+            }
+
             s_retry_num++;
-            ESP_LOGI(TAG, "retry to connect to the AP (%u)", s_retry_num);
-        };
+            esp_read_mac(mac_addr, ESP_MAC_WIFI_STA);
+            ESP_LOGI(TAG, "retry to connect to the AP (%lu) -> %x:%x:%x:%x:%x:%x"
+                , s_retry_num, mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+
             break;
 
-        case WIFI_EVENT_STA_CONNECTED: {
+        case WIFI_EVENT_STA_CONNECTED:
             ESP_LOGI(TAG, "connected to ap SSID: \'%s\' password: \'%s\'", app_config()->wifi_ssid, app_config()->wifi_password);
-        };
+            break;
+
+        case WIFI_EVENT_HOME_CHANNEL_CHANGE:
+            ESP_LOGI(TAG, "recv event: WIFI_EVENT_HOME_CHANNEL_CHANGE");
             break;
 
         default:
-            ESP_LOGE(TAG, "unknown wifi event %i", event_id);
+            ESP_LOGE(TAG, "unknown wifi event %li", event_id);
     }
 }
 
 static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     assert(event_base == IP_EVENT);
+    ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
 
     switch (event_id) {
-        case IP_EVENT_STA_GOT_IP: {
-            ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
-            ESP_LOGI(TAG, "got ip:%s", ip4addr_ntoa(&event->ip_info.ip));
+        case IP_EVENT_STA_GOT_IP:
+            ESP_LOGI(TAG, "got ip:"IPSTR, IP2STR(&(event->ip_info.ip)));
             s_retry_num = 0;
 
             wifi_blink_start(arg);
             ESP_LOGI(TAG, "blink service started");
-        };
+
             break;
 
         default: {
-            ESP_LOGE(TAG, "unknown ip event %i", event_id);
+            ESP_LOGE(TAG, "unknown ip event %li", event_id);
         }
     }
 }
 
 void wifi_init() {
     ESP_LOGI(TAG, "wifi_init_sta starting");
+    wifi_init_config_t default_cfg = WIFI_INIT_CONFIG_DEFAULT();
 
-    tcpip_adapter_init();
+    ESP_ERROR_CHECK(esp_netif_init());
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    wifi_sta_netif = esp_netif_create_default_wifi_sta();
+
     ESP_ERROR_CHECK(esp_wifi_init(&default_cfg));
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, app_config));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, app_config));
+
 
     memset(&wifi_config, 0, sizeof(wifi_config));
     if (app_config()->wifi_use_sta) {
@@ -102,12 +119,11 @@ void wifi_init() {
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
     }
 
-
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "wifi_init_sta finished.");
 }
 
-static void task__blink(void *arg) {
+static void task__blink(void* /* arg */) {
     ESP_LOGI(TAG, "led task started.");
     {
         gpio_config_t io_conf;
@@ -124,17 +140,17 @@ static void task__blink(void *arg) {
         gpio_set_level(GPIO_NUM_2, 0);
         ESP_LOGI(TAG, "led on.");
 
-        vTaskDelay(150 / portTICK_RATE_MS);
+        vTaskDelay(150 / portTICK_PERIOD_MS);
 
         gpio_set_level(GPIO_NUM_2, 1);
         ESP_LOGI(TAG, "led off.");
 
-        vTaskDelay(150 / portTICK_RATE_MS);
+        vTaskDelay(150 / portTICK_PERIOD_MS);
     }
 
     // mdns_start();
     tcp2uart_start();
-    // webctrl_start();
+    webctrl_start();
 
     vTaskDelete(NULL);
     ESP_LOGI(TAG, "led task finish.");

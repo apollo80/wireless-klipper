@@ -10,9 +10,12 @@
 #include "wk_tasks.h"
 #include "wk_bridge.h"
 
+#include <sdkconfig.h>
 #include <freertos/queue.h>
+
 #include <driver/uart.h>
 #include "driver/gpio.h"
+
 #include <sys/cdefs.h>
 #include <esp_log.h>
 
@@ -77,7 +80,7 @@ void tcp2uart_start() {
     bridge_config.msg_net_index  = 0;
     bridge_config.msg_uart_index = 0;
 
-    bridge_config.timer__session = xTimerCreate("udp_session", 10000 / portTICK_RATE_MS, true, NULL, udp_session_done);
+    bridge_config.timer__session = xTimerCreate("udp_session", 10000 / portTICK_PERIOD_MS, true, NULL, udp_session_done);
 
     bridge_config.task__net2uart = NULL;
     bridge_config.sem__net2uart  = xSemaphoreCreateBinary();
@@ -128,8 +131,10 @@ void tcp2uart_stop() {
     }
 
     gpio_set_level(GPIO_NUM_2, 1);
-    vSemaphoreDelete(bridge_config_mutex);
-    bridge_config_mutex = NULL;
+    if (bridge_config_mutex) {
+        vSemaphoreDelete(bridge_config_mutex);
+        bridge_config_mutex = NULL;
+    }
 }
 
 void udp_session_done(TimerHandle_t timer_handle)

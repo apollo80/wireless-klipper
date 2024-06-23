@@ -351,7 +351,7 @@ test_logger.info(f"Testing the custom logger for module {__name__}...")
 loop = asyncio.get_event_loop()
 coro_ser  = serial_asyncio.create_serial_connection(loop, SerialProtocol, '/dev/ttyUSB0', baudrate=74880)
 #coro_sock = loop.create_datagram_endpoint(lambda: ClientProtocol(loop), remote_addr=('esp8266.local', 8888))
-coro_sock = loop.create_datagram_endpoint(lambda: ClientProtocol(loop), remote_addr=('192.168.1.113', 8888))
+coro_sock = loop.create_datagram_endpoint(lambda: ClientProtocol(loop), remote_addr=('192.168.1.114', 8888))
 
 transport_ser, protocol_ser = loop.run_until_complete(coro_ser)
 transport_soc, protocol_soc = loop.run_until_complete(coro_sock)

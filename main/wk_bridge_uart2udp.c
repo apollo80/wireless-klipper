@@ -11,6 +11,7 @@
 
 #include <string.h>
 
+#include <sdkconfig.h>
 #include <freertos/queue.h>
 
 #include <driver/uart.h>
@@ -68,7 +69,7 @@ void bridge_uart2udp(void* arg) {
         msg_header->uart_index = ntohl(bridge_config->msg_uart_index);
 
         wait_min_time =
-                ((3 * UART_FIFO_LEN * 1000) / (bridge_config->app_config->uart_baud_rate / 8)) / portTICK_RATE_MS;
+                ((3 * UART_FIFO_LEN * 1000) / (bridge_config->app_config->uart_baud_rate / 8)) / portTICK_PERIOD_MS;
     }
     bridge_config_unlock();
 
@@ -93,7 +94,7 @@ void bridge_uart2udp(void* arg) {
             msg_header->msg_size   = ntohl(uart_rx_data_offset);
 
             while(try_count < try_count_max) {
-                ESP_LOGI(uart_TAG, "send msg - net_index %u; uart_index: %u; msg_size: %u - try_count %i ..."
+                ESP_LOGI(uart_TAG, "send msg - net_index %lu; uart_index: %lu; msg_size: %u - try_count %i ..."
                     , local__net_index, local__msg_uart_index, uart_rx_data_offset, try_count);
 
                 ssize_t sent_bytes = sendto(socketfd, uart_rx_buffer, uart_rx_data_offset + sizeof(struct msg_header_t), 0
@@ -107,14 +108,14 @@ void bridge_uart2udp(void* arg) {
                     break;
                 }
 
-                ESP_LOGI(uart_TAG, "send msg - net_index %u; uart_index: %u; msg_size: %u - not confirmed, try again!"
+                ESP_LOGI(uart_TAG, "send msg - net_index %lu; uart_index: %lu; msg_size: %u - not confirmed, try again!"
                     , local__net_index, local__msg_uart_index, uart_rx_data_offset);
                 try_count++;
             }
 
             if (try_count < try_count_max) {
 
-                ESP_LOGI(uart_TAG, "sended msg confirmed - net_index %u; uart_index: %u; msg_size: %u - try_count %i"
+                ESP_LOGI(uart_TAG, "sended msg confirmed - net_index %lu; uart_index: %lu; msg_size: %u - try_count %i"
                     , local__net_index, local__msg_uart_index, uart_rx_data_offset, try_count);
 
                 uart_rx_data_offset = 0;
@@ -122,7 +123,7 @@ void bridge_uart2udp(void* arg) {
 
                 gpio_set_level(GPIO_NUM_2, 1);
             } else {
-                ESP_LOGE(uart_TAG, "failed send msg - uart_index: %u the number of attempts (%u) has been exhausted."
+                ESP_LOGE(uart_TAG, "failed send msg - uart_index: %lu the number of attempts (%u) has been exhausted."
                     , local__msg_uart_index, try_count_max);
 
                 uart_rx_data_offset = 0;

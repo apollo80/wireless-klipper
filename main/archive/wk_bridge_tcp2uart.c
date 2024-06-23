@@ -68,7 +68,7 @@ void bridge_tcp2uart(void *arg) {
     ESP_LOGI(tcp_TAG, "socket listening");
 
     while (1) {
-        mdns_start();
+        // mdns_start();
 
         bridge_config->socket = accept(listen_sock, (struct sockaddr *) &source_addr, &source_addr_len);
         if (bridge_config->socket < 0) {
@@ -76,7 +76,7 @@ void bridge_tcp2uart(void *arg) {
             return esp_restart();
         }
         ESP_LOGI(tcp_TAG, "socket accepted");
-        mdns_stop();
+        // mdns_stop();
 
         {
             err_code = setsockopt(bridge_config->socket, IPPROTO_TCP, TCP_NODELAY, (const void*) &yes, sizeof(int));

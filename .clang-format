@@ -2,7 +2,7 @@
 ---
 AccessModifierOffset: -2
 AlignAfterOpenBracket: Align
-AlignArrayOfStructures: None
+#AlignArrayOfStructures: None
 AlignConsecutiveAssignments: None
 AlignConsecutiveBitFields: None
 AlignConsecutiveDeclarations: None
@@ -77,8 +77,8 @@ ForEachMacros:
   - foreach
   - Q_FOREACH
   - BOOST_FOREACH
-IfMacros:
-  - KJ_IF_MAYBE
+#IfMacros:
+#  - KJ_IF_MAYBE
 IncludeBlocks: Preserve
 IncludeCategories:
   - Regex: '^"(llvm|llvm-c|clang|clang-c)/'
@@ -108,7 +108,7 @@ InsertTrailingCommas: None
 JavaScriptQuotes: Leave
 JavaScriptWrapImports: true
 KeepEmptyLinesAtTheStartOfBlocks: true
-LambdaBodyIndentation: Signature
+#LambdaBodyIndentation: Signature
 Language: Cpp
 MacroBlockBegin: ''
 MacroBlockEnd: ''
@@ -120,23 +120,23 @@ ObjCBreakBeforeNestedBlockParam: true
 ObjCSpaceAfterProperty: false
 ObjCSpaceBeforeProtocolList: true
 PPIndentWidth: -1
-PackConstructorInitializers: BinPack
+
 PenaltyBreakAssignment: 1
 PenaltyBreakBeforeFirstCallParameter: 1
 PenaltyBreakComment: 1
 PenaltyBreakFirstLessLess: 1
-PenaltyBreakOpenParenthesis: 1
+#PenaltyBreakOpenParenthesis: 1
 PenaltyBreakString: 1
 PenaltyBreakTemplateDeclaration: 1
 PenaltyExcessCharacter: 1
 PenaltyIndentedWhitespace: 1
 PenaltyReturnTypeOnItsOwnLine: 1
 PointerAlignment: Right
-QualifierAlignment: Leave
-ReferenceAlignment: Pointer
+#QualifierAlignment: Leave
+#ReferenceAlignment: Pointer
 ReflowComments: false
-RemoveBracesLLVM: false
-SeparateDefinitionBlocks: Leave
+#RemoveBracesLLVM: false
+#SeparateDefinitionBlocks: Leave
 ShortNamespaceLines: 0
 SortIncludes: Never
 SortJavaStaticImport: Before
@@ -151,14 +151,14 @@ SpaceBeforeCpp11BracedList: false
 SpaceBeforeCtorInitializerColon: true
 SpaceBeforeInheritanceColon: true
 SpaceBeforeParens: ControlStatements
-SpaceBeforeParensOptions:
-  AfterControlStatements: true
-  AfterForeachMacros: true
-  AfterFunctionDefinitionName: false
-  AfterFunctionDeclarationName: false
-  AfterIfMacros: true
-  AfterOverloadedOperator: false
-  BeforeNonEmptyParentheses: false
+#SpaceBeforeParensOptions:
+#  AfterControlStatements: true
+#  AfterForeachMacros: true
+#  AfterFunctionDefinitionName: false
+#  AfterFunctionDeclarationName: false
+#  AfterIfMacros: true
+#  AfterOverloadedOperator: false
+#  BeforeNonEmptyParentheses: false
 SpaceBeforeRangeBasedForLoopColon: true
 SpaceBeforeSquareBrackets: false
 SpaceInEmptyBlock: false
