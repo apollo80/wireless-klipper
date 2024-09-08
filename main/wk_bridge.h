@@ -1,6 +1,6 @@
 /*
  * @file
- * @brief esp8266 udp2serial bridge for klipper
+ * @brief esp32c2 uart2net bridge for klipper
  *
  * author: apollo80
  * @email: apollo80@list.ru
@@ -21,7 +21,7 @@
 #include <lwip/sockets.h>
 
 
-/// @brief 
+/// @brief
 struct bridge_config_t {
     struct settings_t* app_config;
 
@@ -63,19 +63,29 @@ union uni_header_t {
 
 #define prefix_netData          (0x0A4B5C0D)
 #define prefix_uartData         (0x0A6B7C0D)
+#define prefix_udpLog           (0x0A7B7C0D)
 
 #define prefix_netConfirm       (0x30405060)
 #define prefix_uartConfirm      (0x40506070)
 
 
 /// @brief 
-void bridge_udp2uart(void*);
+void bridge_net2uart(void*);
 
 /// @brief 
-void bridge_uart2udp(void*);
+void bridge_uart2net(void*);
+
+void bridge_uart2net__start(struct bridge_config_t *bridge_config);
+void bridge_uart2net__stop(struct bridge_config_t *bridge_config);
 
 void bridge_config_lock();
 void bridge_config_unlock();
 
+#define CONFIG_WK_UDP_LOG_ENABLE 0
+#if CONFIG_WK_UDP_LOG_ENABLE
+void udp_log(int socket, struct sockaddr_in* socket_address, const char* format, ...);
+#else
+#define udp_log(socket, socket_address, format, ...);
+#endif
 
 #endif // __wireless_klipper__bridge_h__

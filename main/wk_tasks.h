@@ -1,7 +1,6 @@
 /*
  * @file
- * @brief esp8266 tcp2serial bridge for klipper
- * @detauls settings functions
+ * @brief esp32c2 uart2net bridge for klipper
  *
  * @author: apollo80
  * @email: apollo80@list.ru
@@ -19,7 +18,9 @@ void wifi_blink_start();
 // void mdns_start();
 // void mdns_stop();
 
-void tcp2uart_init();
+void uart_init();
+void uart_reinit();
+
 void tcp2uart_start();
 void tcp2uart_stop();
 

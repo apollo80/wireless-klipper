@@ -1,6 +1,6 @@
 /*
  * @file
- * @brief esp8266 tcp2serial bridge for klipper
+ * @brief esp32c2 uart2net bridge for klipper
  *
  * author: apollo80
  * @email: apollo80@list.ru
@@ -46,16 +46,15 @@ struct settings_t
     uint32_t uart_baud_rate;
 
     /// @brief serial port buffer size for receiving data
-    size_t uart_rx_buffer_size;
+    uint32_t uart_rx_buffer_size;
 
 
     /// @brief port of tcp2serial server
     uint16_t net_port;
 
     // buffer size for receiving/transmitting data
-    size_t net_rx_buffer_size;
+    uint32_t net_rx_buffer_size;
 
-/*
     /// @brief Sign of using static network addressing
     bool use_static_ip;
 
@@ -67,7 +66,6 @@ struct settings_t
 
     /// @brief gateway address when using static addressing
     uint8_t static_gateway[4];
-*/
 };
 
 /// @brief 

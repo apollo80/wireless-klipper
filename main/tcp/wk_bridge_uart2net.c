@@ -14,7 +14,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 
-#include "driver/bridge.h"
+#include "driver/uart.h"
 #include "driver/gpio.h"
 
 #include "esp_log.h"
@@ -27,75 +27,47 @@
 static const char *uart_TAG = "uart2tcp";
 static uart_event_t event;
 static TickType_t wait_time = portMAX_DELAY;
-static TickType_t wait_min_time = portMAX_DELAY;
 static size_t uart_rx_buffer_offset = 0;
 static int uart_readed_bytes;
 
 
 extern QueueHandle_t uart0_queue;
 
-void bridge_uart2tcp(void *arg) {
-    ESP_LOGI(uart_TAG, "uart2tcp service started");
+void bridge_uart2net(void *arg) {
+    ESP_LOGI(uart_TAG, "uart2net service started");
 
     struct bridge_config_t *bridge_config = arg;
-    uart_rx_buffer_offset = sizeof(struct msg_header_t);
-    wait_min_time =  ((3 * UART_FIFO_LEN * 1000) / (app_config()->uart_baud_rate / 8)) / portTICK_RATE_MS;
+    uart_rx_buffer_offset = 0;
 
     uart_flush_input(UART_NUM_0);
     while(1) {
-
-        // Waiting for UART event.
-        if (pdFALSE == xQueueReceive(uart0_queue, (void *) &event, wait_time)) {
+        if (uart_rx_buffer_offset
+             && bridge_config->uart_rx_buffer[uart_rx_buffer_offset - 1] == 0x7e) {
             // ESP_LOGI(uart_TAG, "not exist data");
             wait_time = portMAX_DELAY;
 
-            if (uart_rx_buffer_offset <= sizeof(struct msg_header_t))
-                continue;
-
-            struct msg_header_t* header = (struct msg_header_t*)bridge_config->uart_rx_buffer;
-
-            header->msg_prefix = ntohl(prefix_uartData);
-            header->msg_index  = ntohl(msg_index_get());
-            header->msg_size   = ntohl(uart_rx_buffer_offset - sizeof(struct msg_header_t));
-
-            int try_count = 3;
-            while(try_count--) {
-                int err = send(bridge_config->socket, bridge_config->uart_rx_buffer, uart_rx_buffer_offset, 0);
-                if (err < 0) {
-                    ESP_LOGE(uart_TAG, "Error occured during tcp-sending: errno %i", errno);
-                    esp_restart();
-                    return;
-                }
-
-                if (pdTRUE == xSemaphoreTake(bridge_config->sem__tcp2uart, 1000 / portTICK_PERIOD_MS))
-                    break;
-
-                ESP_LOGW(uart_TAG, "confirmation has not been received - try again");
+            int err = send(bridge_config->socket, bridge_config->uart_rx_buffer, uart_rx_buffer_offset, 0);
+            if (err < 0) {
+                ESP_LOGE(uart_TAG, "Error occurred during tcp-sending: errno %i", errno);
+                esp_restart();
+                return;
             }
 
-            if (try_count != 0) {
-                ESP_LOGI(uart_TAG, "send by socket %i bytes confirmed", uart_rx_buffer_offset);
-
-                uart_rx_buffer_offset = sizeof(struct msg_header_t);
-                bzero(bridge_config->uart_rx_buffer, bridge_config->uart_rx_buffer_size);
-
-                gpio_set_level(GPIO_NUM_2, 1);
-            } else {
-                ESP_LOGE(uart_TAG, "failed: send by socket %i bytes: the number of attempts (3) has been exhausted.", uart_rx_buffer_offset);
-
-                // closesocket(bridge_config->socket);
-                // bridge_config->socket = -1;
-                // break;
-            }
+            // bzero(bridge_config->uart_rx_buffer, bridge_config->app_config->uart_rx_buffer_size);
+            uart_rx_buffer_offset = 0;
         }
-        wait_time = wait_min_time;
+
+        // Waiting for UART event.
+        if (pdFALSE == xQueueReceive(uart0_queue, (void *) &event, wait_time)) {
+            continue;
+        }
 
         switch (event.type) {
-            // Event of UART receving data
+            // Event of UART receiving data
             // We'd better handler data event fast, there would be much more data events than
             // other types of events. If we take too much time on data event, the queue might be full.
             case UART_DATA:
-                ESP_LOGI(uart_TAG, "exist data - %u", event.size);
+                // ESP_LOGI(uart_TAG, "exist data - %u", event.size);
                 uart_readed_bytes = uart_read_bytes(UART_NUM_0, bridge_config->uart_rx_buffer + uart_rx_buffer_offset, event.size, wait_time);
 
                 if (uart_readed_bytes < 0) {

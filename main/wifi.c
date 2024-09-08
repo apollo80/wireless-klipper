@@ -1,7 +1,7 @@
 /*
  * @file
- * @brief esp8266 tcp2serial bridge for klipper
- * @detauls settings functions
+ * @brief esp32c2 uart2net bridge for klipper
+ * @details settings functions
  *
  * @author: apollo80
  * @email: apollo80@list.ru
@@ -11,13 +11,11 @@
 #include <sdkconfig.h>
 
 #include <string.h>
-#include <driver/gpio.h>
-
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 
 #include <esp_log.h>
-#include <esp_mac.h>
+#if CONFIG_IDF_TARGET_ESP32C2
+#   include <esp_mac.h>
+#endif
 #include <esp_netif.h>
 #include <esp_event.h>
 #include <esp_wifi.h>
@@ -25,11 +23,13 @@
 
 static const char *TAG = "wk wifi";
 static wifi_config_t wifi_config;
+#if CONFIG_IDF_TARGET_ESP32C2
 static esp_netif_t* wifi_sta_netif = NULL;
+#endif
 static uint32_t s_retry_num = 0;
 
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void* /* event_data */) {
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     assert(event_base == WIFI_EVENT);
     uint8_t mac_addr[6];
 
@@ -39,7 +39,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             break;
 
         case WIFI_EVENT_STA_DISCONNECTED:
-            tcp2uart_stop(arg);
+            tcp2uart_stop();
 
             esp_err_t err = esp_wifi_connect();
             if (err != ESP_OK) {
@@ -48,20 +48,22 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             }
 
             s_retry_num++;
+#ifndef NDEBUG
             esp_read_mac(mac_addr, ESP_MAC_WIFI_STA);
             ESP_LOGI(TAG, "retry to connect to the AP (%lu) -> %x:%x:%x:%x:%x:%x"
                 , s_retry_num, mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-
+#endif
             break;
 
         case WIFI_EVENT_STA_CONNECTED:
             ESP_LOGI(TAG, "connected to ap SSID: \'%s\' password: \'%s\'", app_config()->wifi_ssid, app_config()->wifi_password);
+            ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
             break;
-
+#if CONFIG_IDF_TARGET_ESP32C2
         case WIFI_EVENT_HOME_CHANNEL_CHANGE:
             ESP_LOGI(TAG, "recv event: WIFI_EVENT_HOME_CHANNEL_CHANGE");
             break;
-
+#endif
         default:
             ESP_LOGE(TAG, "unknown wifi event %li", event_id);
     }
@@ -76,10 +78,17 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
             ESP_LOGI(TAG, "got ip:"IPSTR, IP2STR(&(event->ip_info.ip)));
             s_retry_num = 0;
 
+#if CONFIG_IDF_TARGET_ESP8266
             wifi_blink_start(arg);
             ESP_LOGI(TAG, "blink service started");
-
+#else
+            // mdns_start();
+            tcp2uart_start();
+            webctrl_start();
+#endif
             break;
+        case IP_EVENT_STA_LOST_IP:
+            ;
 
         default: {
             ESP_LOGE(TAG, "unknown ip event %li", event_id);
@@ -94,8 +103,9 @@ void wifi_init() {
     ESP_ERROR_CHECK(esp_netif_init());
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+#if CONFIG_IDF_TARGET_ESP32C2
     wifi_sta_netif = esp_netif_create_default_wifi_sta();
-
+#endif
     ESP_ERROR_CHECK(esp_wifi_init(&default_cfg));
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, app_config));
@@ -119,11 +129,12 @@ void wifi_init() {
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
     }
 
-    ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "wifi_init_sta finished.");
+    ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-static void task__blink(void* /* arg */) {
+#if CONFIG_IDF_TARGET_ESP8266
+static void task__blink(void* arg) {
     ESP_LOGI(TAG, "led task started.");
     {
         gpio_config_t io_conf;
@@ -159,3 +170,4 @@ static void task__blink(void* /* arg */) {
 void wifi_blink_start() {
     xTaskCreate(task__blink, "wifi blink", 1024, NULL, 12, NULL);
 }
+#endif

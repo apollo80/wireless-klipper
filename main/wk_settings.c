@@ -1,6 +1,6 @@
 /*
  * @file
- * @brief esp8266 tcp2serial bridge for klipper
+ * @brief esp32c2 uart2net bridge for klipper
  *
  * author: apollo80
  * @email: apollo80@list.ru
@@ -15,7 +15,7 @@
 /// @brief default configuration
 struct settings_t moduleSettings = {
     /// @brief firmware version
-    .version = { 
+    .version = {
         .ver = {
             .major      = 0
             , .minor    = 0
@@ -31,14 +31,14 @@ struct settings_t moduleSettings = {
     , .wifi_use_sta = true
 
     /// @brief wifi SSID
-    , .wifi_ssid = "apollonetwork"    // , .wifi_ssid = "mks robin wifi"
+    , .wifi_ssid = "mks robin wifi"
 
     /// @brief wifi password
-    , .wifi_password = "vfnbkmlf"     // , .wifi_password = "password"
+    , .wifi_password = "password"
 
 
     /// @brief speed of serial port
-    , .uart_baud_rate = 74880       //, .uart_baud_rate = 250000
+    , .uart_baud_rate = 250000
 
     /// @brief serial port buffer size for receiving data
     , .uart_rx_buffer_size = 1024
@@ -49,6 +49,18 @@ struct settings_t moduleSettings = {
 
     /// @brief buffer size for receiving data
     , .net_rx_buffer_size = 1024
+
+    /// @brief Sign of using static network addressing
+    , .use_static_ip = false
+
+    /// @brief static network addressing module
+    , .static_IPaddress = { 192, 168, 4, 4 }
+
+    /// @brief network module when using static network addressing
+    , .static_netmask = { 255, 255, 255, 0 }
+
+    /// @brief gateway address when using static addressing
+    , .static_gateway = { 192, 168, 4, 1 }
 };
 
 static const char *TAG = "setting";
@@ -71,12 +83,12 @@ void app_config_read()
         app_config_write();
         return;
     }
-    
+
     union {
         version_t ver;
         uint32_t  raw;
     } storage_version;
-    
+
     bool need_update_config = false;
     nvs_err = nvs_get_u32(out_handle, "version",             &(storage_version.raw));
     if (moduleSettings.version.raw != storage_version.raw) {
@@ -129,12 +141,13 @@ void app_config_read()
     nvs_err = nvs_get_u32(out_handle, "udp_rx_buffer_size",  &(moduleSettings.net_rx_buffer_size));
     need_update_config |= (nvs_err != ESP_OK);
 
+    nvs_close(out_handle);
+
     if (need_update_config) {
         app_config_write();
     }
 
     nvs_err = ESP_OK;
-    nvs_close(out_handle);
 }
 
 void app_config_write()

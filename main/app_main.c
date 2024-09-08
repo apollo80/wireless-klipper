@@ -1,7 +1,7 @@
 /*
  * @file
- * @brief esp8266 tcp2serial bridge for klipper
- * @detauls settings functions
+ * @brief esp32c2 uart2net bridge for klipper
+ * @details settings functions
  *
  * @author: apollo80
  * @email: apollo80@list.ru
@@ -15,6 +15,6 @@
 void app_main() {
     app_config_read();
 
-    tcp2uart_init();
+    uart_init();
     wifi_init();
 }

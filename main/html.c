@@ -1,6 +1,6 @@
 /*
  * @file
- * @brief esp8266 tcp2serial bridge for klipper
+ * @brief esp32c2 uart2net bridge for klipper
  * @detauls html page template
  *
  * @author: apollo80

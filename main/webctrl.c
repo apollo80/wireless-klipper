@@ -1,7 +1,7 @@
 /*
  * @file
  * @brief web control server
- * @detauls 
+ * @details
  *
  * @author: apollo80
  * @email: apollo80@list.ru
@@ -163,14 +163,12 @@ esp_err_t webctrl_handler__update_self(httpd_req_t *http_req)
             break;
         }
 
-        if (data_read > 0) {
-            ota_write_err = esp_ota_write( update_handle, (const void *)upgrade_data_buf, data_read);
-            if (ota_write_err != ESP_OK) {
-                break;
-            }
-            binary_file_len += data_read;
-            ESP_LOGI(TAG, "Written image length %d", binary_file_len);
+        ota_write_err = esp_ota_write( update_handle, (const void *)upgrade_data_buf, data_read);
+        if (ota_write_err != ESP_OK) {
+            break;
         }
+        binary_file_len += data_read;
+        ESP_LOGI(TAG, "Written image length %d", binary_file_len);
     }
     free(upgrade_data_buf);
     ESP_LOGI(TAG, "Total binary data length writen: %d", binary_file_len);
@@ -202,7 +200,7 @@ esp_err_t webctrl_handler__update_self(httpd_req_t *http_req)
         return err;
     }
     ESP_LOGI(TAG, "esp_ota_set_boot_partition succeeded");
-    
+
     ESP_ERROR_CHECK(httpd_resp_set_status(http_req, HTTPD_200));
     ESP_ERROR_CHECK(httpd_resp_send(http_req, NULL, 0));
     return ESP_OK;
@@ -224,28 +222,35 @@ esp_err_t webctrl_handler__get_config(httpd_req_t *http_req)
 
     static const char json_template[] = 
         "{"
-        "\"version\": \"%i.%i.%i-%i\","
+#ifndef NDEBUG
+        "\"version\": \"%i.%i.%i-%i D\","
+#else
+        "\"version\": \"%i.%i.%i-%i R\","
+#endif
         "\"wifi_hostname\":\"%s\","
         "\"wifi_ssid\":\"%s\","
         "\"wifi_password\":\"%s\","
         "\"use_static_ip\":%s,"
-        "\"static_IPaddress\":\"192.168.4.1\","
-        "\"static_netmask\":\"192.168.4.255\","
-        "\"static_gateway\":\"192.168.4.1\","
+        "\"static_IPaddress\":\"%u.%u.%u.%u\","
+        "\"static_netmask\":\"%u.%u.%u.%u\","
+        "\"static_gateway\":\"%u.%u.%u.%u\","
         "\"uart_baud_rate_option\":[9600, 14400, 19200, 28800, 38400, 38400, 57600, 74880, 115200, 230400, 250000, 256000, 460800, 576000, 921600],"
         "\"uart_baud_rate\":%lu,"
-        "\"uart_rx_buffer_size\":%u,"
+        "\"uart_rx_buffer_size\":%lu,"
         "\"tcp_port\":%u,"
-        "\"tcp_rx_buffer_size\":%u"
+        "\"tcp_rx_buffer_size\":%lu"
         "}";
     struct settings_t* config = app_config();
-    
+
     int config_size = snprintf(config_buf, CONFIG_BUF_SIZE, json_template,
         config->version.ver.major, config->version.ver.minor, config->version.ver.revision, config->version.ver.bugfix
         , config->wifi_hostname
         , config->wifi_ssid
         , config->wifi_password
-        , (config->wifi_use_sta ? "true" : "false")
+        , (config->use_static_ip ? "true" : "false")
+        , config->static_IPaddress[0], config->static_IPaddress[1], config->static_IPaddress[2], config->static_IPaddress[3]
+        , config->static_netmask[0], config->static_netmask[1], config->static_netmask[2], config->static_netmask[3]
+        , config->static_gateway[0], config->static_gateway[1], config->static_gateway[2], config->static_gateway[3]
         , config->uart_baud_rate
         , config->uart_rx_buffer_size
         , config->net_port
@@ -290,10 +295,8 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
             break;
         }
 
-        if (data_read > 0) {
-            config_size += data_read;
-            ESP_LOGI(TAG, "Written image length %d", config_size);
-        }
+        config_size += data_read;
+        ESP_LOGI(TAG, "Written image length %d", config_size);
     }
     config_buf[config_size] = 0;
 
@@ -316,7 +319,7 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
             }
             continue;
         }
-        
+
         if (value == NULL) {
             if (config_buf[idx] != '&') {
                 value_size++;
@@ -330,7 +333,7 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
 
 #define min(a,b)    ((a) > (b) ? (b):(a))
         ESP_LOGD(TAG, "Receive parameter: %s = %s", key, value);
-        
+
         if (0 == strncmp(key, "wifi_hostname", key_size)) {
             strncpy(app_config()->wifi_hostname, value, min(sizeof(app_config()->wifi_hostname), value_size + 1));
             ESP_LOGD(TAG, "    set 'wifi_hostname' in '%s'", app_config()->wifi_hostname);
@@ -379,8 +382,8 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
             if (ret != ULONG_MAX) {
                 app_config()->uart_rx_buffer_size = ret;
             }
-            ESP_LOGD(TAG, "    set 'uart_rx_buffer_size' in '%i'", app_config()->uart_rx_buffer_size);
-        
+            ESP_LOGD(TAG, "    set 'uart_rx_buffer_size' in '%lu'", app_config()->uart_rx_buffer_size);
+
         } else if (0 == strncmp(key, "tcp_port", key_size)) {
             char *end_ptr = NULL;
             unsigned long ret = strtoul(value, &end_ptr, 10);
@@ -388,14 +391,14 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
                 app_config()->net_port = ret;
             }
             ESP_LOGD(TAG, "    set 'tcp_port' in '%i'", app_config()->net_port);
-        
+
         } else if (0 == strncmp(key, "tcp_rx_buffer_size", key_size)) {
             char *end_ptr = NULL;
             unsigned long ret = strtoul(value, &end_ptr, 10);
             if (ret != ULONG_MAX) {
                 app_config()->net_rx_buffer_size = ret;
             }
-            ESP_LOGD(TAG, "    set 'tcp_rx_buffer_size' in '%i'", app_config()->net_rx_buffer_size);
+            ESP_LOGD(TAG, "    set 'tcp_rx_buffer_size' in '%lu'", app_config()->net_rx_buffer_size);
         }
 #undef min
 
