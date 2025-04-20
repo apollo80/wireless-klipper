@@ -9,66 +9,98 @@
 
 #pragma once
 
-#ifndef __pty2udp_proxy_h__
-#define __pty2udp_proxy_h__
+#ifndef pty2udp_proxy_h
+#define pty2udp_proxy_h
 
 #include "log.h"
 
 #include <stdlib.h>
 #include <limits.h>
-#include <stdbool.h>
-#include <arpa/inet.h>
 
 #include <event2/event.h>
+#include <netinet/in.h>
+
+
+struct p2u_serial_t { ;
+    char            path[PATH_MAX];
+    uint32_t        baud;
+
+    int             fd_master;
+    int             fd_slave;
+
+    uint8_t         rx_buffer[2048];
+    size_t          rx_data_size;
+
+    uint8_t         send_pkg[2048];
+    size_t          send_pkg_size;
+
+    struct event*   ev;
+};
+
+struct p2u_network_t { ;
+    char            to_name[PATH_MAX];
+    in_port_t       to_port;
+
+    struct sockaddr to_address;
+    int             socket;
+
+    struct event*   ev_recv;
+
+    struct { ;
+        struct event   *ev_timeout;
+        struct timeval timeout;
+    } client_hello;
+
+    struct {
+        struct {
+            struct event *ev;
+            struct timeval timeout;
+
+            int count;
+            int count_max;
+        } send;
+
+        struct {
+            struct event *ev;
+            struct timeval timeout;
+        } recv;
+
+        struct timeval timeout;
+    } ping;
+
+    uint8_t         rx_buffer[2048];
+    size_t          rx_pkg_size;
+};
 
 
 /// @brief
 struct pty2udp_proxy {
-    struct event_base* event_base;
+    struct event_base* ev_loop;
 
     // -- serial
-    char          serial_path[PATH_MAX];
-    uint32_t      serial_baud;
-    int           serial_fd;
-    int           serial_fd_slave;
-    uint8_t       serial_rx[2048];
-    size_t        serial_data_size;
-    struct event* serial_event;
-
-    // -- network
-    char            server_name[PATH_MAX];
-    in_port_t       server_port;
-    int             socket_fd;
-    uint8_t         socket_rx[2048];
-    struct event*   network_event;
-    struct sockaddr server_address;
+    struct p2u_serial_t  serial;
+    struct p2u_network_t network;
 
     // -- session
-    int session_start;
+    uint32_t msg_index_klipper;
+    uint32_t msg_index_mcu;
 
-    uint32_t msg_net_index;
-    uint32_t msg_uart_index;
+    struct {
+        struct event*  ev_timeout;
+        struct timeval timeout;
 
-    bool first_uart_message;
-    bool msg_net_confirmed;
-
-    struct event* resend_timeout_event;
-    struct timeval resend_timeout;
-    size_t resend_count;
-    size_t resend_count_max;
+        size_t count;
+    } resend;
 
     // --
-    char        log_path[PATH_MAX];
-    FILE*       log_file;
-    log_level_t log_level;
+    struct log_t log;
 };
 
 /// @brief
 struct msg_header_t {
-    uint32_t msg_prefix;
-    uint32_t net_index;
-    uint32_t uart_index;
-    uint32_t msg_size;
+    uint8_t  msg_prefix;
+    uint8_t  msg_index;
+    uint16_t msg_size;
 };
 
 /// @brief
@@ -79,59 +111,159 @@ union uni_header_t {
 
 // #define header_size         16
 
-#define prefix_netStart     (0x0A1B2C0D)
-#define prefix_uartStart    (0x0A2B3C0D)
+// message format:
+// |            header             | ...
+// | 1 bytes | 1 bytes   | 2 bytes |        data       |
+// | prefix  | index = 0 |       4 | server IP address |
+#define prefix_clientHello          (0x01)
 
-#define prefix_netData      (0x0A4B5C0D)
-#define prefix_uartData     (0x0A6B7C0D)
-#define prefix_udpLog       (0x0A7B7C0D)
+// | 1 bytes | 1 bytes   | 2 bytes |        data       |
+// | prefix  | index = 0 |       4 | server IP address |
+#define prefix_serverHello          (0x02)
 
-#define prefix_netConfirm   (0x30405060)
-#define prefix_uartConfirm  (0x40506070)
+// | 1 bytes | 1 bytes |  2 bytes  |     data     |
+// | prefix  | index   | data size | klipper data |
+#define prefix_klipperData          (0x03)
+
+// | 1 bytes | 1 bytes |  2 bytes  |     data     |
+// | prefix  |  index  |    ???    |
+#define prefix_klipperDataConfirm   (0x04)
+
+// | 1 bytes | 1 bytes |  2 bytes  |     data     |
+// | prefix  | index   | data size |   mcu data   |
+#define prefix_mcuData              (0x05)
+
+// | 1 bytes | 1 bytes |  2 bytes  |     data     |
+// | prefix  |  index  |    ???    |
+#define prefix_mcuDataConfirm       (0x06)
+
+#define prefix_clnPingReq           (0x0E)
+#define prefix_srvPingRep           (0x0F)
+
+#define prefix_udpLog               (0x81)
 
 
 /// @brief
 /// @param[in] idx_setting
 struct pty2udp_proxy*  pty2udp_proxy_new();
 
-
 /// @brief
 /// @return
 size_t pty2udp_proxy_count();
 
 /// @brief
-/// @param[in] proxy_index
-/// @return
-struct pty2udp_proxy* pty2udp_proxy_get(size_t proxy_index);
-
-/// @brief
 /// @param[in] idx_setting
 /// @return
-struct pty2udp_proxy* pty2udp_proxy_init(size_t proxy_index, struct event_base *base);
+int pty2udp_proxy_init(size_t proxy_index, struct event_base *ev_loop);
 
 /// @brief
 /// @param[in] idx_setting
 void pty2udp_proxy_reset(size_t idx_setting);
 
+/***
+ * Serial functions
+ */
+
+void cb__serial_recv(evutil_socket_t socket, short events, void* arg);
 
 /// @brief
-/// @param[in] base
-/// @param[in] idx_settings
-/// @param[in] serial_path
-/// @param[in] serial_baud
-struct event* init_serial(struct event_base *base, size_t idx_settings);
+/// @param[in] proxy
+/// @return
+int serial_init(struct pty2udp_proxy* proxy);
 
 /// @brief
-/// @param[in] proxy_settings
-// void reinit_serial(struct pty2udp_proxy* proxy_settings);
+/// @param[in] proxy
+/// @return
+int serial_finish(struct pty2udp_proxy* proxy);
+
+/***
+ * Network functions
+ */
+
+void cb__udp_recv(evutil_socket_t socket, short events, void* arg);
+
 
 /// @brief
-/// @param[in] base
-/// @param[in] idx_settings
-/// @param[in] server_name
-/// @param[in] server_port
-// struct event* init_network(struct event_base *base, size_t idx_settings);
+/// @param[in] proxy
+/// @return
+int network_init(struct pty2udp_proxy* proxy);
+
+/// @brief
+/// @param[in] proxy
+/// @return
+int network_finish(struct pty2udp_proxy* proxy);
+
+/// @brief
+/// @param[in] proxy
+/// @return
+int net_send_client_hello(struct pty2udp_proxy* proxy);
+
+/// @brief
+/// @param[in] proxy
+/// @return
+void net_recv_server_hello(struct pty2udp_proxy* proxy);
+
+/// @brief
+/// @param[in] proxy
+/// @return
+int net_send_ping(struct pty2udp_proxy* proxy);
+
+/// @brief
+/// @param[in] proxy
+/// @return
+void net_recv_ping(struct pty2udp_proxy* proxy);
+
+/// @brief
+/// @param[in] proxy
+/// @return
+void net_ping_update_timer(struct pty2udp_proxy* proxy);
 
 
-#endif // __pty2udp_proxy_h__
+/// @brief
+/// @param[in] proxy
+/// @return
+void net_send_klipper_data(struct pty2udp_proxy* proxy);
 
+/// @brief
+/// @param[in] proxy
+/// @return
+void net_recv_klipper_data_confirm(struct pty2udp_proxy* proxy);
+
+/// @brief
+/// @param[in] proxy
+/// @return
+void net_recv_mcu_data(struct pty2udp_proxy* proxy);
+
+/***
+ * Timeout functions
+ * */
+
+/// @brief
+/// @param[in] socket
+/// @param[in] events
+/// @param[in] arg
+/// @return
+void cb_timeout__client_hello(evutil_socket_t socket, short events, void* arg);
+
+/// @brief
+/// @param[in] socket
+/// @param[in] events
+/// @param[in] arg
+/// @return
+void cb_timeout__send_ping(evutil_socket_t socket, short events, void* arg);
+
+/// @brief
+/// @param[in] socket
+/// @param[in] events
+/// @param[in] arg
+/// @return
+void cb_timeout__recv_ping(evutil_socket_t socket, short events, void* arg);
+
+/// @brief
+/// @param[in] socket
+/// @param[in] events
+/// @param[in] arg
+/// @return
+void cb_timeout__klipper_data(evutil_socket_t serial_fd, short events, void* args);
+
+#endif // pty2udp_proxy_h

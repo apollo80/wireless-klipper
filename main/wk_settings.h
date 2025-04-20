@@ -46,14 +46,14 @@ struct settings_t
     uint32_t uart_baud_rate;
 
     /// @brief serial port buffer size for receiving data
-    uint32_t uart_rx_buffer_size;
+    uint16_t uart_rx_buffer_size;
 
 
     /// @brief port of tcp2serial server
     uint16_t net_port;
 
     // buffer size for receiving/transmitting data
-    uint32_t net_rx_buffer_size;
+    uint16_t net_rx_buffer_size;
 
     /// @brief Sign of using static network addressing
     bool use_static_ip;

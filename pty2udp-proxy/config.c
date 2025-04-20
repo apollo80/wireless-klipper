@@ -18,13 +18,13 @@ static void unknown_option(struct pty2udp_proxy* proxy, const char* key, const c
 
 void config_read(const char* cfg_filename) {
     if (!cfg_filename) {
-        fprintf(stderr, "failed: invalid filename");
+        fprintf(stderr, "failed: invalid filename\n");
         return;
     }
 
     FILE* cfgfile = fopen(cfg_filename, "r");
     if(!cfgfile) {
-        fprintf(stderr, "failed: can't open file %s: %i", cfg_filename, errno);
+        fprintf(stderr, "failed: can't open file %s: %i\n", cfg_filename, errno);
         return;
     }
 
@@ -42,15 +42,15 @@ void config_read(const char* cfg_filename) {
         size_t line_len = strlen(line);
         char* ptr = line;
 
-        // ищем первый символ, отличный от пробельный (пробел, табуляци и т.п.)
+        // looking for the first character other than the space character (space, tab, etc.)
         while (*ptr && (*ptr == ' ' || *ptr == '\f' || *ptr == '\t' || *ptr == '\v'))
             ptr++;
 
-        // если строке не содержит не пробельных символов - пропускам ее
+        // if the string does not contain non-whitespace characters, skip it
         if (! *ptr)
             continue;
 
-        // если первый не пробельный символ является символом комментария - пропускам строку
+        // if the first non-whitespace character is a comment character, skip the line
         if (*ptr == '#' || *ptr == ';')
             continue;
 
@@ -58,18 +58,18 @@ void config_read(const char* cfg_filename) {
         {
             ptr++;
 
-            // после символа '[' ищем первый не пробельный символ
+            // after the '[' character, looking for the first non-whitespace character
             while (*ptr && (*ptr == ' ' || *ptr == '\f' || *ptr == '\t' || *ptr == '\v'))
                 ptr++;
 
             char* section_name = ptr;
             char* end = ptr;
 
-            // следом ищем символ ']'
+            // next, looking for the symbol ']'
             while(*end && *end != ']')
                 ++end;
 
-            // если не символ ']' не найден - ошибка
+            // if not the character ']' is not found - an error
             if(! *end) {
                 fprintf(stderr, "failed read config: error in line %zu\n", line_num);
                 break;
@@ -82,14 +82,14 @@ void config_read(const char* cfg_filename) {
 
             end--;
 
-            // удаляем лишние пробельные символы в конце строки
+            // removing extra whitespace characters at the end of the line
             while(*end == ' ' || *end == '\f' || *end == '\t' || *end == '\v')
                 end--;
 
             end++;
             *end = 0;
 
-            // выделяем из строки значение секции
+            // cutting the value of the section from the string
             if (0 == strcasecmp(section_name, "proxy")) {
                 proxy = pty2udp_proxy_new();
                 option_func = proxy_option;
@@ -99,18 +99,18 @@ void config_read(const char* cfg_filename) {
             continue;
         }
 
-        // определяем начало ключа
+        // determining the beginning of the key
         char* key = ptr;
 
-        // пропускаем пустую строку
+        // skip the empty line
         if (*ptr == '\r' || *ptr == '\n')
             continue;
 
-        // ищем разделитель - знак разделителя ':'
+        // looking for a separator - the separator sign ':'
         while(*ptr && *ptr != ':')
             ptr++;
 
-        // если разделитель не найден - ошибка
+        // if the separator is not found, an error occurs
         if (! *ptr) {
             fprintf(stderr, "failed read config: error in line %zu\n", line_num);
             break;
@@ -121,7 +121,7 @@ void config_read(const char* cfg_filename) {
             // return;
         }
 
-        // выделяем из строки значение ключа
+        // cutting out the key value from the string
         {
             char *end = ptr - 1;
             while (*end == ' ' || *end == '\f' || *end == '\t' || *end == '\v')
@@ -131,12 +131,12 @@ void config_read(const char* cfg_filename) {
             *end = 0;
         }
 
-        // выделяем из строки значение параметра ключа
+        // cutting out the value of the key parameter from the string
         char* value = ptr + 1;
         while(*value && (*value == ' ' || *value == '\f' || *value == '\t' || *value == '\v'))
             value++;
 
-        // выделяем из строки значение параметра ключа
+        // cutting out the value of the key parameter from the string
         {
             char *end = line + line_len - 1;
             while (*end == ' ' || *end == '\f' || *end == '\t' || *end == '\v'  || *end == '\r' || *end == '\n' )
@@ -166,50 +166,49 @@ void proxy_option(struct pty2udp_proxy* proxy, const char* key, const char* valu
         return;
 
     if (0 == strcasecmp(key, "serial_path")) {
-        memcpy(proxy->serial_path, value, strlen(value));
+        memcpy(proxy->serial.path, value, strlen(value));
         return;
     }
 
     if (0 == strcasecmp(key, "serial_baud")) {
-        proxy->serial_baud = strtoul(value, NULL, 0);
+        proxy->serial.baud = strtoul(value, NULL, 0);
         return;
     }
 
     if (0 == strcasecmp(key, "server_name")) {
-        memcpy(proxy->server_name, value, strlen(value));
+        memcpy(proxy->network.to_name, value, strlen(value));
         return;
     }
 
     if (0 == strcasecmp(key, "server_port")) {
-        proxy->server_port = strtoul(value, NULL, 0);
+        proxy->network.to_port = strtoul(value, NULL, 0);
         return;
     }
 
     if (0 == strcasecmp(key, "log_file")) {
-        memcpy(proxy->log_path, value, strlen(value));
+        memcpy(proxy->log.path, value, strlen(value));
         return;
     }
 
     if (0 == strcasecmp(key, "log_level")) {
         if (0 == strcasecmp(value, "trace")) {
-            proxy->log_level = TRACE;
+            proxy->log.level = TRACE;
         } else if (0 == strcasecmp(value, "debug")) {
-            proxy->log_level = DEBUG;
+            proxy->log.level = DEBUG;
         } else if (0 == strcasecmp(value, "info")) {
-            proxy->log_level = INFO;
+            proxy->log.level = INFO;
         } else if (0 == strcasecmp(value, "warning")) {
-            proxy->log_level = WARNING;
+            proxy->log.level = WARNING;
         } else if (0 == strcasecmp(value, "error")) {
-            proxy->log_level = ERROR;
+            proxy->log.level = ERROR;
         } else if (0 == strcasecmp(value, "critical")) {
-            proxy->log_level = CRITICAL;
+            proxy->log.level = CRITICAL;
         }
 
         return;
     }
-
 }
 
 void unknown_option(struct pty2udp_proxy* proxy, const char* key, const char* value) {
-
+    ;
 }

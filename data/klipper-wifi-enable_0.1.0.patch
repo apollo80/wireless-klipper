@@ -1,0 +1,76 @@
+diff --git a/src/stm32/Kconfig b/src/stm32/Kconfig
+index e3961176..bec2a946 100644
+--- a/src/stm32/Kconfig
++++ b/src/stm32/Kconfig
+@@ -517,4 +517,8 @@ config STM32_CANBUS_PC2_PC3
+     bool
+     default y if STM32_MMENU_CANBUS_PC2_PC3 || STM32_CMENU_CANBUS_PC2_PC3
+ 
++config ENABLE_WIFI
++    bool "Enable support MKS Robin WiFi module"
++    default n
++
+ endif
+diff --git a/src/stm32/Makefile b/src/stm32/Makefile
+index 18af2e9d..cf0ede35 100644
+--- a/src/stm32/Makefile
++++ b/src/stm32/Makefile
+@@ -29,6 +29,7 @@ CFLAGS-$(CONFIG_MACH_STM32G0) += -mcpu=cortex-m0plus -Ilib/stm32g0/include
+ CFLAGS-$(CONFIG_MACH_STM32G4) += -mcpu=cortex-m4 -Ilib/stm32g4/include
+ CFLAGS-$(CONFIG_MACH_STM32H7) += -mcpu=cortex-m7 -Ilib/stm32h7/include
+ CFLAGS-$(CONFIG_MACH_STM32L4) += -mcpu=cortex-m4 -Ilib/stm32l4/include
++CFLAGS-$(CONFIG_ENABLE_WIFI)  += -DENABLE_WIFI
+ CFLAGS += $(CFLAGS-y) -D$(MCU_UPPER) -mthumb -Ilib/cmsis-core -Ilib/fast-hash
+ 
+ CFLAGS_klipper.elf += --specs=nano.specs --specs=nosys.specs
+diff --git a/src/stm32/serial.c b/src/stm32/serial.c
+index 19aa048e..acd529e5 100644
+--- a/src/stm32/serial.c
++++ b/src/stm32/serial.c
+@@ -7,6 +7,7 @@
+ #include "autoconf.h" // CONFIG_SERIAL_BAUD
+ #include "board/armcm_boot.h" // armcm_enable_irq
+ #include "board/serial_irq.h" // serial_rx_byte
++#include "generic/gpio.h"
+ #include "command.h" // DECL_CONSTANT_STR
+ #include "internal.h" // enable_pclock
+ #include "sched.h" // DECL_INIT
+@@ -81,6 +82,38 @@ serial_enable_tx_irq(void)
+ void
+ serial_init(void)
+ {
++#if defined(ENABLE_WIFI)
++    // Marlin 2.1.1 :
++    // SET_OUTPUT(MKS_WIFI_IO0);
++    // WRITE(MKS_WIFI_IO0, HIGH);
++    struct gpio_out MKS_WIFI_IO0 = gpio_out_setup(GPIO('A',8), 0);
++    gpio_out_write(MKS_WIFI_IO0, 1);
++
++    // Marlin
++    // SET_OUTPUT(MKS_WIFI_IO4);
++    // WRITE(MKS_WIFI_IO4, HIGH);
++    struct gpio_out MKS_WIFI_IO4 = gpio_out_setup(GPIO('C', 7), 0);
++    gpio_out_write(MKS_WIFI_IO4, 1);
++
++    // Marlin
++    // SET_OUTPUT(MKS_WIFI_IO_RST);
++    // WRITE(MKS_WIFI_IO_RST, LOW);
++    struct gpio_out MKS_WIFI_IO_RST = gpio_out_setup(GPIO('A', 5), 0);
++    gpio_out_write(MKS_WIFI_IO_RST, 0);
++
++    // Marlin
++    // safe_delay(200);
++    // WRITE(MKS_WIFI_IO_RST, HIGH);
++    udelay(200 * 1000);
++    gpio_out_write(MKS_WIFI_IO_RST, 1);
++
++    // Marlin
++    // safe_delay(200);
++    // WRITE(MKS_WIFI_IO4, LOW);
++    udelay(200 * 1000);
++    gpio_out_write(MKS_WIFI_IO4, 0);
++#endif
++
+     enable_pclock((uint32_t)USARTx);
+ 
+     uint32_t pclk = get_pclock_frequency((uint32_t)USARTx);

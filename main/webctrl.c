@@ -26,7 +26,7 @@
 
 
 static const char *TAG = "webctrl";
-static httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+static httpd_config_t httpd_default_config = HTTPD_DEFAULT_CONFIG();
 static httpd_handle_t server = NULL;
 
 static esp_err_t webctrl_handler__root(httpd_req_t *http_req);
@@ -70,36 +70,48 @@ static httpd_uri_t restart__post = {
     .user_ctx = NULL
 };
 
-void webctrl_start()
-{
+void webctrl_start() {
     // Start the httpd server
-    ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
+    ESP_LOGI(TAG, "Web server starting on port: '%d'", httpd_default_config.server_port);
 
-    esp_err_t ret = httpd_start(&server, &config);
-    if (ret == ESP_OK) {
-        // Set URI handlers
-        ESP_LOGI(TAG, "Registering URI handlers");
-
-        httpd_register_uri_handler(server, &root__get);
-        httpd_register_uri_handler(server, &update_self__post);
-        httpd_register_uri_handler(server, &get_config__post);
-        httpd_register_uri_handler(server, &set_config__post);
-        httpd_register_uri_handler(server, &restart__post);
+    esp_err_t ret = httpd_start(&server, &httpd_default_config);
+    if (ret != ESP_OK) {
+        ESP_LOGI(TAG, "Error starting server - ret code %i", ret);
         return;
     }
 
-    ESP_LOGI(TAG, "Error starting server!");
-    return;
+    // Set URI handlers
+    ESP_LOGI(TAG, "Registering URI handlers");
+
+    httpd_register_uri_handler(server, &root__get);
+    httpd_register_uri_handler(server, &update_self__post);
+    httpd_register_uri_handler(server, &get_config__post);
+    httpd_register_uri_handler(server, &set_config__post);
+    httpd_register_uri_handler(server, &restart__post);
 }
 
-void webctrl_stop()
-{
+void webctrl_stop() {
+    if (NULL == server) {
+        return;
+    }
+
+    // Unset URI handlers
+    ESP_LOGI(TAG, "Unregistering URI handlers");
+
+    httpd_unregister_uri_handler(server, restart__post.uri, restart__post.method);
+    httpd_unregister_uri_handler(server, set_config__post.uri, set_config__post.method);
+    httpd_unregister_uri_handler(server, get_config__post.uri, get_config__post.method);
+    httpd_unregister_uri_handler(server, update_self__post.uri, update_self__post.method);
+    httpd_unregister_uri_handler(server, root__get.uri, root__get.method);
+
+    // Stop the httpd server
     httpd_stop(server);
     server = NULL;
+
+    ESP_LOGI(TAG, "Web server stopped");
 }
 
-esp_err_t webctrl_handler__root(httpd_req_t *http_req)
-{
+esp_err_t webctrl_handler__root(httpd_req_t *http_req) {
     ESP_LOGI(TAG, "webctrl_handler__root() begin.");
 
     ESP_ERROR_CHECK(httpd_resp_set_status(http_req, HTTPD_200));
@@ -110,8 +122,7 @@ esp_err_t webctrl_handler__root(httpd_req_t *http_req)
     return ESP_OK;
 }
 
-esp_err_t webctrl_handler__update_self(httpd_req_t *http_req)
-{
+esp_err_t webctrl_handler__update_self(httpd_req_t *http_req) {
     esp_ota_handle_t update_handle = 0;
     const esp_partition_t *update_partition = NULL;
 
@@ -125,7 +136,11 @@ esp_err_t webctrl_handler__update_self(httpd_req_t *http_req)
         ESP_ERROR_CHECK(httpd_resp_send(http_req, NULL, 0));
         return ESP_FAIL;
     }
+#if CONFIG_IDF_TARGET_ESP32C2
     ESP_LOGI(TAG, "Writing to partition subtype %u at offset 0x%lx", update_partition->subtype, update_partition->address);
+#elif CONFIG_IDF_TARGET_ESP8266
+    ESP_LOGI(TAG, "Writing to partition subtype %u at offset 0x%x", update_partition->subtype, update_partition->address);
+#endif
 
     esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
     if (err != ESP_OK) {
@@ -206,8 +221,7 @@ esp_err_t webctrl_handler__update_self(httpd_req_t *http_req)
     return ESP_OK;
 }
 
-esp_err_t webctrl_handler__get_config(httpd_req_t *http_req)
-{
+esp_err_t webctrl_handler__get_config(httpd_req_t *http_req) {
     ESP_LOGI(TAG, "Starting config uploading...");
 
     char *config_buf = (char *)malloc(CONFIG_BUF_SIZE);
@@ -222,11 +236,11 @@ esp_err_t webctrl_handler__get_config(httpd_req_t *http_req)
 
     static const char json_template[] = 
         "{"
-#ifndef NDEBUG
-        "\"version\": \"%i.%i.%i-%i D\","
-#else
+//#ifdef NDEBUG
         "\"version\": \"%i.%i.%i-%i R\","
-#endif
+//#else
+//        "\"version\": \"%i.%i.%i-%i D\","
+//#endif
         "\"wifi_hostname\":\"%s\","
         "\"wifi_ssid\":\"%s\","
         "\"wifi_password\":\"%s\","
@@ -235,15 +249,19 @@ esp_err_t webctrl_handler__get_config(httpd_req_t *http_req)
         "\"static_netmask\":\"%u.%u.%u.%u\","
         "\"static_gateway\":\"%u.%u.%u.%u\","
         "\"uart_baud_rate_option\":[9600, 14400, 19200, 28800, 38400, 38400, 57600, 74880, 115200, 230400, 250000, 256000, 460800, 576000, 921600],"
+#if CONFIG_IDF_TARGET_ESP32C2
         "\"uart_baud_rate\":%lu,"
-        "\"uart_rx_buffer_size\":%lu,"
+#elif CONFIG_IDF_TARGET_ESP8266
+        "\"uart_baud_rate\":%u,"
+#endif
+        "\"uart_rx_buffer_size\":%u,"
         "\"tcp_port\":%u,"
-        "\"tcp_rx_buffer_size\":%lu"
+        "\"tcp_rx_buffer_size\":%u"
         "}";
     struct settings_t* config = app_config();
 
-    int config_size = snprintf(config_buf, CONFIG_BUF_SIZE, json_template,
-        config->version.ver.major, config->version.ver.minor, config->version.ver.revision, config->version.ver.bugfix
+    int config_size = snprintf(config_buf, CONFIG_BUF_SIZE, json_template
+        , config->version.ver.major, config->version.ver.minor, config->version.ver.revision, config->version.ver.bugfix
         , config->wifi_hostname
         , config->wifi_ssid
         , config->wifi_password
@@ -268,8 +286,7 @@ esp_err_t webctrl_handler__get_config(httpd_req_t *http_req)
     return ESP_OK;
 }
 
-esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
-{
+esp_err_t webctrl_handler__set_config(httpd_req_t *http_req) {
     ESP_LOGI(TAG, "Starting config update...");
 
     char *config_buf = (char *)malloc(CONFIG_BUF_SIZE);
@@ -353,7 +370,8 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
         } else if (0 == strncmp(key, "wifi_password", key_size)) {
             strncpy(app_config()->wifi_password, value, min(sizeof(app_config()->wifi_password), value_size + 1));
             ESP_LOGD(TAG, "    set 'wifi_password' in '%s'", app_config()->wifi_password);
-/*
+/* TODO ...
+
         } else if (0 == strncmp(key, "use_static_ip", key_size)) {
             if (0 == strncmp(value, "true", value_size)) {
                 app_config()->use_static_ip = true;
@@ -363,9 +381,9 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
             ESP_LOGD(TAG, "    set 'use_static_ip' in '%s'", (app_config()->use_static_ip ? "true" : "false"));
 
         } else if (0 == strncmp(key, "static_IPaddress", key_size)) {
-
+            ;
         } else if (0 == strncmp(key, "static_IPaddress", key_size)) {
-
+            ;
         } else if (0 == strncmp(key, "static_IPaddress", key_size)) {
 */
         } else if (0 == strncmp(key, "uart_baud_rate", key_size)) {
@@ -374,7 +392,11 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
             if (ret != ULONG_MAX) {
                 app_config()->uart_baud_rate = ret;
             }
+#if CONFIG_IDF_TARGET_ESP32C2
             ESP_LOGD(TAG, "    set 'uart_baud_rate' in '%lu'", app_config()->uart_baud_rate);
+#elif CONFIG_IDF_TARGET_ESP8266
+            ESP_LOGD(TAG, "    set 'uart_baud_rate' in '%u'", app_config()->uart_baud_rate);
+#endif
 
         } else if (0 == strncmp(key, "uart_rx_buffer_size", key_size)) {
             char *end_ptr = NULL;
@@ -382,7 +404,7 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
             if (ret != ULONG_MAX) {
                 app_config()->uart_rx_buffer_size = ret;
             }
-            ESP_LOGD(TAG, "    set 'uart_rx_buffer_size' in '%lu'", app_config()->uart_rx_buffer_size);
+            ESP_LOGD(TAG, "    set 'uart_rx_buffer_size' in '%u'", app_config()->uart_rx_buffer_size);
 
         } else if (0 == strncmp(key, "tcp_port", key_size)) {
             char *end_ptr = NULL;
@@ -398,7 +420,7 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
             if (ret != ULONG_MAX) {
                 app_config()->net_rx_buffer_size = ret;
             }
-            ESP_LOGD(TAG, "    set 'tcp_rx_buffer_size' in '%lu'", app_config()->net_rx_buffer_size);
+            ESP_LOGD(TAG, "    set 'tcp_rx_buffer_size' in '%u'", app_config()->net_rx_buffer_size);
         }
 #undef min
 
@@ -417,12 +439,11 @@ esp_err_t webctrl_handler__set_config(httpd_req_t *http_req)
     return ESP_OK;
 }
 
-esp_err_t webctrl_handler__restart(httpd_req_t *http_req)
-{
+esp_err_t webctrl_handler__restart(httpd_req_t *http_req) {
     ESP_ERROR_CHECK(httpd_resp_set_status(http_req, HTTPD_200));
     ESP_ERROR_CHECK(httpd_resp_send(http_req, NULL, 0));
 
-    // FIXME: create task
+    // TODO: create task?
     vTaskDelay(500 / portTICK_PERIOD_MS);
     esp_restart();
     return ESP_OK;

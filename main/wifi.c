@@ -15,9 +15,11 @@
 #include <esp_log.h>
 #if CONFIG_IDF_TARGET_ESP32C2
 #   include <esp_mac.h>
+#elif CONFIG_IDF_TARGET_ESP8266
+#   include <driver/gpio.h>
 #endif
-#include <esp_netif.h>
 #include <esp_event.h>
+#include <esp_netif.h>
 #include <esp_wifi.h>
 
 
@@ -26,50 +28,59 @@ static wifi_config_t wifi_config;
 #if CONFIG_IDF_TARGET_ESP32C2
 static esp_netif_t* wifi_sta_netif = NULL;
 #endif
-static uint32_t s_retry_num = 0;
+static uint16_t s_retry_num = 0;
+
+
+static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     assert(event_base == WIFI_EVENT);
-    uint8_t mac_addr[6];
+//#ifndef NDEBUG
+//    uint8_t mac_addr[6];
+//#endif
 
+    esp_err_t err = ESP_OK;
     switch (event_id) {
         case WIFI_EVENT_STA_START:
-            esp_wifi_connect();
+            ESP_LOGI(TAG, "try connect to ap SSID: \'%s\' with password: \'%s\'", app_config()->wifi_ssid, app_config()->wifi_password);
+            ESP_ERROR_CHECK(esp_wifi_connect());
             break;
 
         case WIFI_EVENT_STA_DISCONNECTED:
-            tcp2uart_stop();
-
-            esp_err_t err = esp_wifi_connect();
+            err = esp_wifi_connect();
             if (err != ESP_OK) {
                 ESP_LOGI(TAG, "esp_wifi_connect() return %i", err);
                 return;
             }
 
             s_retry_num++;
-#ifndef NDEBUG
-            esp_read_mac(mac_addr, ESP_MAC_WIFI_STA);
-            ESP_LOGI(TAG, "retry to connect to the AP (%lu) -> %x:%x:%x:%x:%x:%x"
-                , s_retry_num, mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-#endif
+//#ifndef NDEBUG
+//            esp_read_mac(mac_addr, ESP_MAC_WIFI_STA);
+//            ESP_LOGI(TAG, "retry to connect to the AP (%u) -> %x:%x:%x:%x:%x:%x"
+//                , s_retry_num, mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+//#endif
             break;
 
         case WIFI_EVENT_STA_CONNECTED:
             ESP_LOGI(TAG, "connected to ap SSID: \'%s\' password: \'%s\'", app_config()->wifi_ssid, app_config()->wifi_password);
-            ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
             break;
+
 #if CONFIG_IDF_TARGET_ESP32C2
         case WIFI_EVENT_HOME_CHANNEL_CHANGE:
             ESP_LOGI(TAG, "recv event: WIFI_EVENT_HOME_CHANNEL_CHANGE");
             break;
 #endif
         default:
+#if CONFIG_IDF_TARGET_ESP32C2
             ESP_LOGE(TAG, "unknown wifi event %li", event_id);
+#elif CONFIG_IDF_TARGET_ESP8266
+            ESP_LOGE(TAG, "unknown wifi event %i", event_id);
+#endif
     }
 }
 
-static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     assert(event_base == IP_EVENT);
     ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
 
@@ -82,17 +93,24 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
             wifi_blink_start(arg);
             ESP_LOGI(TAG, "blink service started");
 #else
-            // mdns_start();
-            tcp2uart_start();
-            webctrl_start();
+            if (! net2uart_is_started()) {
+                // mdns_start();
+                net2uart_start();
+                uart2net_start();
+                webctrl_start();
+            }
 #endif
             break;
         case IP_EVENT_STA_LOST_IP:
-            ;
+            ESP_LOGI(TAG, "lost ip:"IPSTR, IP2STR(&(event->ip_info.ip)));;
+            break;
 
-        default: {
+        default:
+#if CONFIG_IDF_TARGET_ESP32C2
             ESP_LOGE(TAG, "unknown ip event %li", event_id);
-        }
+#elif CONFIG_IDF_TARGET_ESP8266
+            ESP_LOGE(TAG, "unknown ip event %i", event_id);
+#endif
     }
 }
 
@@ -108,17 +126,13 @@ void wifi_init() {
 #endif
     ESP_ERROR_CHECK(esp_wifi_init(&default_cfg));
 
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, app_config));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, app_config));
-
-
     memset(&wifi_config, 0, sizeof(wifi_config));
     if (app_config()->wifi_use_sta) {
         memcpy(wifi_config.sta.ssid, app_config()->wifi_ssid, strlen(app_config()->wifi_ssid));
         memcpy(wifi_config.sta.password, app_config()->wifi_password, strlen(app_config()->wifi_password));
 
         /* Setting a password implies station will connect to all security modes including WEP/WPA.
-         * However these modes are deprecated and not advisable to be used. Incase your Access point
+         * However, these modes are deprecated and not advisable to be used. In case your Access point
          * doesn't support WPA2, these mode can be enabled by commenting below line */
 
         if (wifi_config.sta.password[0]) {
@@ -129,7 +143,14 @@ void wifi_init() {
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
     }
 
+    ESP_ERROR_CHECK(esp_wifi_set_event_mask(WIFI_EVENT_MASK_ALL));
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, app_config));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, app_config));
+
     ESP_LOGI(TAG, "wifi_init_sta finished.");
+    esp_log_level_set("wifi", ESP_LOG_NONE);
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
@@ -159,9 +180,12 @@ static void task__blink(void* arg) {
         vTaskDelay(150 / portTICK_PERIOD_MS);
     }
 
-    // mdns_start();
-    tcp2uart_start();
-    webctrl_start();
+    if (! net2uart_is_started()) {
+        // mdns_start();
+        net2uart_start();
+        uart2net_start();
+        webctrl_start();
+    }
 
     vTaskDelete(NULL);
     ESP_LOGI(TAG, "led task finish.");

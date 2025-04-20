@@ -20,25 +20,16 @@
 #include <unistd.h>
 
 
-
-// struct pty2udp_proxy proxy_list[128];
+static void cb_system_signal(int signal, short events, void* args);
 
 int main(int argc, char** argv)
 {
-    // create event loop
-    struct event_base *base = event_base_new();
-    if (!base) {
-        fprintf(stderr, "Could not initialize libevent!\n");
-        return 1;
-    }
-
     // check argument
     if (argc == 1) {
         fprintf(stdout,
-        "Usage:\n"
-        "    %s <config file>\n", basename(argv[0]));
+                "Usage:\n"
+                "    %s <config file>\n", basename(argv[0]));
 
-        event_base_free(base);
         return EXIT_FAILURE;
     }
 
@@ -55,28 +46,48 @@ int main(int argc, char** argv)
     // read config
     config_read(argv[1]);
     if (0 == pty2udp_proxy_count()) {
-        fprintf(stderr, "Error config: no proxy settings\n");
+        fprintf(stderr,
+                "Error config: no proxy settings\n");
         return EXIT_FAILURE;
     }
+
+    struct event_base *default_ev_loop = event_base_new();
+    if (NULL == default_ev_loop) {
+        fprintf(stderr,
+                "Error: failed initialize event loop library\n");
+        return EXIT_FAILURE;
+    }
+
     for(size_t idx = 0; idx < pty2udp_proxy_count(); idx++) {
-        pty2udp_proxy_init(idx, base);
+        pty2udp_proxy_init(idx, default_ev_loop);
     }
 
     // init signal
-    struct event *ev_sigTERM = evsignal_new(base, SIGTERM, cb_proxy__sigTERM, base);
+    struct event *ev_sigTERM = evsignal_new(default_ev_loop, SIGTERM, cb_system_signal, default_ev_loop);
     evsignal_add(ev_sigTERM, NULL);
 
+    // init signal
+    struct event *ev_sigINT = evsignal_new(default_ev_loop, SIGINT, cb_system_signal, default_ev_loop);
+    evsignal_add(ev_sigINT, NULL);
+
     // run loop
-    event_base_dispatch(base);
+    int ret = event_base_dispatch(default_ev_loop);
+    // TODO: нужно проверять код возврата (?)
 
     // free memory
     for(size_t idx = 0; idx < pty2udp_proxy_count(); idx++) {
         pty2udp_proxy_reset(idx);
     }
 
+    event_free(ev_sigINT);
     event_free(ev_sigTERM);
-    event_base_free(base);
-
+    event_base_free(default_ev_loop);
     return EXIT_SUCCESS;
 }
 
+void cb_system_signal(int signal, short events, void* args) {
+    struct event_base *base = args;
+
+    LOG_INFO(NULL, "received signal %i", signal);
+    event_base_loopbreak(base);
+}

@@ -8,7 +8,9 @@
 
 #include "wk_tasks.h"
 #include "wk_bridge.h"
+#include "wk_udp_log.h"
 
+#include <string.h>
 #include <stdio.h>
 #include <sys/cdefs.h>
 
@@ -17,267 +19,438 @@
 #include "driver/uart.h"
 #include "driver/gpio.h"
 
+#include <lwip/err.h>
+#include <lwip/udp.h>
+
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_system.h"
 
-#include "lwip/err.h"
 
 
 static const char *udp_TAG = "udp2uart";
+static const char* prefix_name[] = {
+    "unknown (0x00)"
+    , "clientHello (0x01)"
+    , "serverHello (0x02)"
+    , "klipperData (0x03)"
+    , "klipperDataConfirm (0x04)"
+    , "mcuData (0x05)"
+    , "mcuDataConfirm (0x06)"
+    , "unknown (0x07)"
+    , "unknown (0x08)"
+    , "unknown (0x09)"
+    , "unknown (0x0a)"
+    , "unknown (0x0b)"
+    , "unknown (0x0c)"
+    , "unknown (0x0d)"
+    , "clnPingReq (0x0e)"
+    , "srvPingRep (0x0f)"
+};
 
-static struct sockaddr_in listen_addr;
-static int listen_sock = -1;
-static int err_code = 0;
 
-static union uni_header_t send_confirm;
+static void process__clientHello(struct bridge_config_t *bridge_config, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port);
+static void process__clientPingReq(struct bridge_config_t *bridge_config, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port);
+static void process__klipper_data(struct bridge_config_t *bridge_config, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port);
+static void process__mcu_data_confirm(struct bridge_config_t *bridge_config, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port);
 
-static SemaphoreHandle_t sem__net2uart = NULL;
+static void send_confirmation(struct bridge_config_t *bridge_config, uint8_t recv_index, const ip_addr_t *ip_addr, uint16_t port);
 
-static struct sockaddr_in source_address;
-static socklen_t          source_address_len;
-
-static void send_confirmation(struct bridge_config_t *bridge_config);
-static void write_to_uart(struct bridge_config_t *bridge_config);
-static void process__msg_confirm(struct bridge_config_t *bridge_config, bool exist_session);
-void process__msg_start(struct bridge_config_t *bridge_config, bool exist_session);
-static void process__msg_data(struct bridge_config_t *bridge_config, bool exist_session);
-
-void bridge_net2uart(void *arg) {
-    ESP_LOGI(udp_TAG, "udp2uart service started");
+void udp_recv_cb(void *arg, struct udp_pcb *pcb, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port)
+{
     struct bridge_config_t *bridge_config = arg;
-    assert(bridge_config);
+    assert(bridge_config != NULL);
     assert(bridge_config->app_config);
 
-    sem__net2uart = bridge_config->sem__net2uart;
-
-    listen_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (listen_sock < 0) {
-        ESP_LOGE(udp_TAG, "unable to create socket: errno %d", errno);
-        return esp_restart();
+    LWIP_UNUSED_ARG(pcb);
+    if (pbuf == NULL) {
+        return;
     }
-    ESP_LOGI(udp_TAG, "socket created");
 
-    listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    listen_addr.sin_family = AF_INET;
-    listen_addr.sin_port = htons(app_config()->net_port);
-
-    err_code = bind(listen_sock, (struct sockaddr *) &listen_addr, sizeof(listen_addr));
-    if (err_code != 0) {
-        ESP_LOGE(udp_TAG, "socket unable to bind: errno %d", errno);
-        return esp_restart();
+    if (pbuf->next != NULL) {
+        ESP_LOGW(udp_TAG, "recv msg: exist next pbuf");
     }
-    ESP_LOGI(udp_TAG, "socket binded");
-    bridge_config->socket = listen_sock;
 
-    source_address_len = sizeof(source_address);
-    memset(&(source_address), 0, source_address_len);
+    if (pbuf->len != pbuf->tot_len) {
+        ESP_LOGW(udp_TAG, "recv msg: pbuf->len != pbuf->tot_len");
+    }
 
-    uint8_t *net_rx_buffer = bridge_config->net_rx_buffer;
-    size_t   net_rx_buffer_size = app_config()->net_rx_buffer_size;
+    struct msg_header_t *recv_header = (struct msg_header_t*) pbuf->payload;
+#ifndef NDEBUG
+    if (recv_header->msg_prefix > 0x0f) {
+        ESP_LOGI(udp_TAG, "recv msg - incorrect prefix: %i", recv_header->msg_prefix);
+        return;
+    }
+    ESP_LOGI(udp_TAG, "recv msg - prefix: %s; pkg_size: %u, msg_index: %u; msg_size: %u"
+        , prefix_name[recv_header->msg_prefix]
+        , pbuf->len
+        , recv_header->msg_index
+        , ntohs(recv_header->msg_size));
+#endif
 
-    struct msg_header_t *recv_header = (struct msg_header_t*) net_rx_buffer;
-    while (1) {
-        ESP_LOGI(udp_TAG, "waiting data ...");
-        ssize_t recv_bytes = recvfrom(listen_sock, net_rx_buffer, net_rx_buffer_size, 0
-            , (struct sockaddr *) &(source_address), &(source_address_len));
+    // ESP_ERROR_CHECK(udp_log_init(ip_addr, 1345));
 
-        if (recv_bytes == 0) {
-            continue;
-        }
-
-        // Error occured during receiving
-        if (recv_bytes < 0) {
-            ESP_LOGE(udp_TAG, "recvfrom() failed: errno %i", errno);
+    switch (recv_header->msg_prefix) {
+        case prefix_clientHello:
+            process__clientHello(bridge_config, pbuf, ip_addr, port);
             break;
-        }
 
-        recv_header->msg_prefix = ntohl(recv_header->msg_prefix);
-        recv_header->net_index  = ntohl(recv_header->net_index);
-        recv_header->uart_index = ntohl(recv_header->uart_index);
-        recv_header->msg_size   = ntohl(recv_header->msg_size);
+        case prefix_clnPingReq:
+            process__clientPingReq(bridge_config, pbuf, ip_addr, port);
+            break;
 
-        ESP_LOGI(udp_TAG, "recv msg - prefix: 0x%08lx; net_index: %lu; uart_index: %lu; msg_size: %lu", recv_header->msg_prefix
-            , recv_header->net_index, recv_header->uart_index, recv_header->msg_size);
+        case prefix_klipperData:
+            process__klipper_data(bridge_config, pbuf, ip_addr, port);
+            break;
 
+        case prefix_mcuDataConfirm:
+            process__mcu_data_confirm(bridge_config, pbuf, ip_addr, port);
+            break;
 
-        bridge_config_lock();
-        bool exist_session = (bridge_config->task__uart2net != NULL);
-        bridge_config_unlock();
-
-        if (exist_session)  {
-            xTimerReset(bridge_config->timer__session, 5);
-        }
-
-        switch (recv_header->msg_prefix) {
-            case prefix_uartConfirm:
-                process__msg_confirm(bridge_config, exist_session);
-                break;
-
-            case prefix_netStart:
-                process__msg_start(bridge_config, exist_session);
-                break;
-
-            case prefix_netData:
-                process__msg_data(bridge_config, exist_session);
-                break;
-
-            default:
-                ESP_LOGW(udp_TAG, "incorrect msg prefix (%lx) - skip it", recv_header->msg_prefix);
-                break;
-        }
+        default:
+            ESP_LOGW(udp_TAG, "incorrect msg prefix (%x) - skip it", recv_header->msg_prefix);
+            break;
     }
 
-    vTaskDelete(NULL);
+    pbuf_free(pbuf);
 }
 
-void process__msg_confirm(struct bridge_config_t *bridge_config, bool exist_session) {
-    struct msg_header_t *recv_header = (struct msg_header_t*) bridge_config->net_rx_buffer;
+void process__clientHello(struct bridge_config_t *bridge_config, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port) {
+    struct msg_header_t *recv_header = (struct msg_header_t*) pbuf->payload;
+    uint16_t msg_size = ntohs(recv_header->msg_size);
 
-    if (!exist_session) {
-        ESP_LOGI(udp_TAG, "recv uart confirm msg - net_index %lu; uart_index: %lu - but session not started -> skip msg"
-                 , recv_header->net_index, recv_header->uart_index);
-
-        return;
-    }
-
-    bridge_config_lock();
-    uint32_t stored_uart_index = bridge_config->msg_uart_index;
-    bridge_config_unlock();
-
-    if (recv_header->uart_index == stored_uart_index) {
-        ESP_LOGI(udp_TAG, "recv uart confirm msg - net index %lu; uart index: %lu; stored uart index %lu -> Ok"
-                 , recv_header->net_index, recv_header->uart_index, stored_uart_index);
-
-        xSemaphoreGive(sem__net2uart);
-    } else
-        ESP_LOGW(udp_TAG, "recv confirm msg (net_index %lu; uart_index: %lu) - skip it"
-                 , recv_header->net_index, recv_header->uart_index);
-}
-
-void process__msg_start(struct bridge_config_t *bridge_config, bool exist_session) {
-    struct msg_header_t *recv_header = (struct msg_header_t*) bridge_config->net_rx_buffer;
-
-    if(exist_session) {
-        ESP_LOGI(udp_TAG, "recv start msg - duplicate");
-        return;
-    }
+    // TODO: need to add protection against resending
 
     bridge_config_lock();
     {
-        bridge_config->msg_net_index = recv_header->net_index;
-        bridge_config->msg_uart_index = recv_header->uart_index;
+        bridge_config->msg_net_index = 0;
+        bridge_config->msg_uart_index = 0;
 
-        memcpy(&(bridge_config->source_address), &source_address, sizeof(bridge_config->source_address));
-        bridge_config->source_address_len = source_address_len;
-#ifndef NDEBUG
-        uint8_t remote_address[4] = {
-            (source_address.sin_addr.s_addr & 0x000000ff),
-            (source_address.sin_addr.s_addr & 0x0000ff00) >> 8,
-            (source_address.sin_addr.s_addr & 0x00ff0000) >> 16,
-            (source_address.sin_addr.s_addr & 0xff000000) >> 24
-        };
-        ESP_LOGI(udp_TAG, "new session - %u.%u.%u.%u:%u", remote_address[0], remote_address[1],
-                 remote_address[2], remote_address[3], ntohs(source_address.sin_port));
-#endif
+        memcpy(&(bridge_config->source_address), ip_addr, sizeof(bridge_config->source_address));
+        bridge_config->source_port = port;
     }
     bridge_config_unlock();
 
-    if(bridge_config->task__uart2net) {
-        vTaskDelete(bridge_config->task__uart2net);
-        bridge_config->task__uart2net = NULL;
+#ifndef NDEBUG
+    uint8_t remote_address[4] = {
+#if CONFIG_IDF_TARGET_ESP32C2
+            (ip_addr->addr & 0x000000ff),
+            (ip_addr->addr & 0x0000ff00) >> 8,
+            (ip_addr->addr & 0x00ff0000) >> 16,
+            (ip_addr->addr & 0xff000000) >> 24
+#elif CONFIG_IDF_TARGET_ESP8266
+            (ip_addr->u_addr.ip4.addr & 0x000000ff),
+            (ip_addr->u_addr.ip4.addr & 0x0000ff00) >> 8,
+            (ip_addr->u_addr.ip4.addr & 0x00ff0000) >> 16,
+            (ip_addr->u_addr.ip4.addr & 0xff000000) >> 24
+#else
+#error Unknown IDF_TARGET
+#endif
+    };
+    ESP_LOGI(udp_TAG, "start new session with %u.%u.%u.%u:%u"
+        , remote_address[0], remote_address[1], remote_address[2], remote_address[3], port);
+#endif
 
-        uart_reinit();
+    // stop web server?
+    // webctrl_stop();
+
+    // send response
+    {
+        struct pbuf* send_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct msg_header_t) + msg_size, PBUF_RAM);
+        if (send_pbuf == NULL) {
+            ESP_LOGE(udp_TAG, "pbuf_alloc() failed " __FILE__ ":%i", __LINE__);
+            esp_restart();
+        }
+
+        struct msg_header_t* send_header = send_pbuf->payload;
+
+        send_header->msg_prefix = prefix_serverHello;
+        send_header->msg_index  = 0;
+        send_header->msg_size   = htons(msg_size);
+
+        memcpy(send_pbuf->payload + sizeof(struct msg_header_t)
+            , pbuf->payload + sizeof(struct msg_header_t)
+            , msg_size);
+
+        err_t ret = udp_sendto(bridge_config->udp_socket, send_pbuf, ip_addr, port);
+        pbuf_free(send_pbuf);
+
+        if (ret != ESP_OK) {
+            ESP_LOGE(udp_TAG, "clientHello failed: response sendto(): ret %i", ret);
+            return;
+        }
+
+        ESP_LOGI(udp_TAG, "send server hello - msg_index %u, msg_size %u ok", recv_header->msg_index, msg_size);
     }
 
-    bridge_uart2net__start(bridge_config);
-    ESP_LOGI(udp_TAG, "recv start msg - uart msg index reset");
-
-    // send confirmation
-    send_confirmation(bridge_config);
-
-    // and write data to uart
-    write_to_uart(bridge_config);
+    // start session timer
+    xTimerStop(bridge_config->timer__session, 5);
+    xTimerStart(bridge_config->timer__session, 5);
 }
 
-void process__msg_data(struct bridge_config_t *bridge_config, bool exist_session)
-{
-    struct msg_header_t *recv_header = (struct msg_header_t*) bridge_config->net_rx_buffer;
+void process__clientPingReq(struct bridge_config_t *bridge_config, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port) {
+    struct msg_header_t *recv_header = (struct msg_header_t*) pbuf->payload;
+    uint16_t msg_size = ntohs(recv_header->msg_size);
 
-    uint16_t stored_net_index = bridge_config->msg_net_index;
-    uint16_t recv_net_index = recv_header->net_index;
-    // recv_net_index is expected to be equal to stored_net_index
+    // checking address and port of client
+    bool is_correct_ping = true;
+    bridge_config_lock();
+    {
+#if CONFIG_IDF_TARGET_ESP32C2
+        if (bridge_config->source_address.addr != ip_addr->addr) {
+            ESP_LOGE(udp_TAG, "clientPing: incorrect client address: %lx (waiting %lx)"
+            , ip_addr->addr, bridge_config->source_address.addr);
+            is_correct_ping &= true;
+        }
+#elif CONFIG_IDF_TARGET_ESP8266
+         if (bridge_config->source_address.u_addr.ip4.addr != ip_addr->u_addr.ip4.addr) {
+             ESP_LOGE(udp_TAG, "clientPing: incorrect client address: %x (waiting %x)"
+                , ip_addr->u_addr.ip4.addr, bridge_config->source_address.u_addr.ip4.addr);
+             is_correct_ping &= true;
+         }
+#else
+#error Unknown IDF_TARGET
+#endif
+        if (bridge_config->source_port != port) {
+            ESP_LOGE(udp_TAG, "clientPing: incorrect client port: %x (waiting %x)", port, bridge_config->source_port);
+            is_correct_ping &= true;
+        }
+    }
+    bridge_config_unlock();
+    if (!is_correct_ping)
+        return;
 
-    // correction for intersections in the range of 2^8
-    if (stored_net_index > 250 && recv_net_index < 5) {
-        recv_net_index += (UINT8_MAX + 1);
+    struct pbuf* send_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct msg_header_t) + msg_size, PBUF_RAM);
+    if (send_pbuf == NULL) {
+        ESP_LOGE(udp_TAG, "pbuf_alloc() failed " __FILE__ ":%i", __LINE__);
+        esp_restart();
     }
 
-    if (recv_net_index <= stored_net_index) {
-        ESP_LOGI(udp_TAG, "recv data msg - (net_index %lu; uart_index: %lu) - is duplicate - stored net_index %u"
-                , recv_header->net_index, recv_header->uart_index, stored_net_index);
+    struct msg_header_t* send_header = send_pbuf->payload;
+
+    send_header->msg_prefix = prefix_srvPingRep;
+    send_header->msg_index  = recv_header->msg_index;
+    send_header->msg_size   = htons(msg_size);
+
+    memcpy(send_pbuf->payload + sizeof(struct msg_header_t)
+            , pbuf->payload + sizeof(struct msg_header_t)
+            , msg_size);
+
+    err_t ret = udp_sendto(bridge_config->udp_socket, send_pbuf, ip_addr, port);
+    pbuf_free(send_pbuf);
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(udp_TAG, "clientPing failed: response sendto(): ret %i", ret);
         return;
     }
 
+    // restart session timer
+    xTimerReset(bridge_config->timer__session, 5);
+    ESP_LOGI(udp_TAG, "send server ping response - net_index %u; msg_size %u - ok", recv_header->msg_index, msg_size);
+}
+
+void process__klipper_data(struct bridge_config_t *bridge_config, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port) {
+    struct msg_header_t *recv_header = (struct msg_header_t*) pbuf->payload;
+    const char* data_offset =  (const char*)(pbuf->payload + sizeof(struct msg_header_t));
+    uint16_t msg_size   = ntohs(recv_header->msg_size);
+
+    // checking address and port of client
+    bool is_correct_klipper_data = true;
     bridge_config_lock();
-    bridge_config->msg_net_index = recv_header->net_index;
+    {
+#if CONFIG_IDF_TARGET_ESP32C2
+        if (bridge_config->source_address.addr != ip_addr->addr) {
+            ESP_LOGE(udp_TAG, "klipper data: incorrect client address: %lx (waiting %lx)"
+                    , ip_addr->addr, bridge_config->source_address.addr);
+            is_correct_klipper_data &= true;
+        }
+#elif CONFIG_IDF_TARGET_ESP8266
+        if (bridge_config->source_address.u_addr.ip4.addr != ip_addr->u_addr.ip4.addr) {
+            ESP_LOGE(udp_TAG, "klipper data: incorrect client address: %x (waiting %x)"
+                , ip_addr->u_addr.ip4.addr, bridge_config->source_address.u_addr.ip4.addr);
+            is_correct_klipper_data &= true;
+        }
+#else
+#error Unknown IDF_TARGET
+#endif
+        if (bridge_config->source_port != port) {
+            ESP_LOGE(udp_TAG, "klipper data: incorrect client port: %x (waiting %x)", port, bridge_config->source_port);
+            is_correct_klipper_data &= true;
+        }
+    }
     bridge_config_unlock();
+    if (!is_correct_klipper_data)
+        return;
 
+    uint8_t stored_net_index = bridge_config->msg_net_index;
+    uint16_t recv_net_index = recv_header->msg_index;
+    // recv_net_index is expected to be equal to stored_net_index
 
-    bridge_config_lock();
-    uint32_t local__msg_uart_index = bridge_config->msg_uart_index;
-    bridge_config_unlock();
+    if (stored_net_index != recv_net_index) {
+        if (stored_net_index == ((recv_net_index + 1) % (UINT8_MAX + 1))) {
+            ESP_LOGI(udp_TAG, "recv old data msg - (net_index %u; stored net_index %u) - is duplicate; confirm it"
+                 , recv_net_index, stored_net_index);
 
-    if (recv_header->uart_index == local__msg_uart_index) {
-        ESP_LOGI(udp_TAG, "recv data msg - confirm(%lu) - Ok", recv_header->uart_index);
+            // send confirmation
+            send_confirmation(bridge_config, recv_net_index, ip_addr, port);
+            return;
+        }
 
-        xSemaphoreGive(sem__net2uart);
+        ESP_LOGI(udp_TAG, "recv data msg - (net_index %u; stored net_index %u) - is duplicate; skip"
+            , recv_net_index, stored_net_index);
+        return;
     }
 
     // send confirmation
-    send_confirmation(bridge_config);
+    send_confirmation(bridge_config, recv_net_index, ip_addr, port);
 
     // and write data to uart
-    write_to_uart(bridge_config);
+    write_to_uart(bridge_config, data_offset, msg_size);
+
+    bridge_config_lock();
+    bridge_config->msg_net_index++;
+    bridge_config_unlock();
 }
 
-static void send_confirmation(struct bridge_config_t *bridge_config) {
-    struct msg_header_t *recv_header = (struct msg_header_t*) bridge_config->net_rx_buffer;
+void process__mcu_data_confirm(struct bridge_config_t *bridge_config, struct pbuf *pbuf, const ip_addr_t *ip_addr, uint16_t port) {
+    struct msg_header_t *recv_header = (struct msg_header_t*) pbuf->payload;
 
-    send_confirm.header.msg_prefix = htonl(prefix_netConfirm);
-    send_confirm.header.net_index  = htonl(recv_header->net_index);
-    send_confirm.header.uart_index = htonl(recv_header->uart_index);
-    send_confirm.header.msg_size   = 0;
-    ssize_t sent_bytes = sendto(listen_sock, send_confirm.raw, sizeof(send_confirm), 0
-                                , (struct sockaddr *) &(source_address), source_address_len);
+    LWIP_UNUSED_ARG(ip_addr);
+    LWIP_UNUSED_ARG(port);
 
-    assert(sent_bytes == sizeof(send_confirm));
-    // if (sent_bytes < 0) {
-    //     ESP_LOGE(udp_TAG, "sendto() failed: errno %i", errno);
-    //     break;
-    // }
+    bridge_config_lock();
+    uint8_t stored_uart_index = bridge_config->msg_uart_index;
+    SemaphoreHandle_t sem__net2uart = bridge_config->sem__net2uart;
+    bridge_config_unlock();
 
-    ESP_LOGI(udp_TAG, "send confirm msg - net_index %lu; uart_index: %lu - ok", recv_header->net_index, recv_header->uart_index);
-    udp_log(listen_sock, &source_address
-            , "net2uart: send confirm msg - net_index %lu; uart_index: %lu - ok", recv_header->net_index, recv_header->uart_index);
+    if (recv_header->msg_index == stored_uart_index) {
+        ESP_LOGI(udp_TAG, "recv uart confirm msg - uart index: %u; stored uart index %u -> Ok"
+                 , recv_header->msg_index, stored_uart_index);
+
+        xSemaphoreGive(sem__net2uart);
+    } else
+        ESP_LOGW(udp_TAG, "recv confirm msg (uart_index: %u, stored uart index %u) - skip it"
+                 , recv_header->msg_index, stored_uart_index);
 }
 
-void write_to_uart(struct bridge_config_t *bridge_config) {
-    struct msg_header_t *recv_header = (struct msg_header_t*) bridge_config->net_rx_buffer;
-    uint8_t *net_rx_buffer = bridge_config->net_rx_buffer;
-
-    // ESP_LOGI(udp_TAG, "recv %u bytes, data %u", recv_bytes, recv_header->msg_size);
-    int write_len = uart_write_bytes(UART_NUM_0
-                                     , (const char *)net_rx_buffer + sizeof(struct msg_header_t), recv_header->msg_size);
-
-    if (write_len != recv_header->msg_size) {
-        ESP_LOGE(udp_TAG, "error write data to uart");
-        return esp_restart();
+void send_confirmation(struct bridge_config_t *bridge_config, uint8_t recv_index, const ip_addr_t *ip_addr, uint16_t port) {
+    struct pbuf* send_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct msg_header_t), PBUF_RAM);
+    if (send_pbuf == NULL) {
+        ESP_LOGE(udp_TAG, "pbuf_alloc() failed " __FILE__ ":%i", __LINE__);
+        esp_restart();
     }
 
-    ESP_LOGI(udp_TAG, "write to uart %d bytes", write_len);
+    struct msg_header_t* send_header = send_pbuf->payload;
+
+    send_header->msg_prefix = prefix_klipperDataConfirm;
+    send_header->msg_index  = recv_index;
+    send_header->msg_size   = 0;
+
+    err_t ret = udp_sendto(bridge_config->udp_socket, send_pbuf, ip_addr, port);
+    pbuf_free(send_pbuf);
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(udp_TAG, "send confirm msg failed: response sendto(): ret %i", ret);
+        return;
+    }
+
+    ESP_LOGI(udp_TAG, "send confirm msg - net_index %u; - ok", recv_index);
+}
+
+bool send_uart_data(struct bridge_config_t *bridge_config, size_t data_size) {
+    static uint8_t try_count_max = 100;
+    assert(data_size < bridge_config->app_config->uart_rx_buffer_size);
+
+    uint8_t local__msg_uart_index = 0;
+    SemaphoreHandle_t sem__net2uart = NULL;
+    ip_addr_t send_address;
+    uint16_t  send_port;
+    bool session_exist = true;
+    bridge_config_lock();
+    {
+#if CONFIG_IDF_TARGET_ESP32C2
+        if (bridge_config->source_address.addr != 0) {
+            memcpy(&send_address, &(bridge_config->source_address), sizeof(send_address));
+        } else
+            session_exist &= false;
+#elif CONFIG_IDF_TARGET_ESP8266
+        if (bridge_config->source_address.u_addr.ip4.addr != 0) {
+            memcpy(&send_address, &(bridge_config->source_address), sizeof(send_address));
+        } else
+            session_exist &= false;
+#else
+#error Unknown IDF_TARGET
+#endif
+
+        if (bridge_config->source_port != 0) {
+            send_port = bridge_config->source_port;
+        } else
+            session_exist &= false;
+
+        local__msg_uart_index = bridge_config->msg_uart_index;
+        sem__net2uart = bridge_config->sem__net2uart;
+    }
+    bridge_config_unlock();
+    if (!session_exist) {
+        return false;
+    }
+
+    uint8_t try_count = 0;
+    while(try_count < try_count_max) {
+        struct pbuf* send_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct msg_header_t) + data_size, PBUF_RAM);
+        if (send_pbuf == NULL) {
+            ESP_LOGE(udp_TAG, "pbuf_alloc() failed " __FILE__ ":%i", __LINE__);
+            esp_restart();
+        }
+
+        struct msg_header_t* send_header = send_pbuf->payload;
+        send_header->msg_prefix = prefix_mcuData;
+        send_header->msg_index  = local__msg_uart_index;
+        send_header->msg_size   = htons(data_size);
+
+        uint8_t* data_offset = send_pbuf->payload + sizeof(struct msg_header_t);
+        memcpy(data_offset, bridge_config->uart_rx_buffer, data_size);
+
+        ESP_LOGI(udp_TAG, "send msg - uart_index: %u; msg_size: %u + %u - try_count %i ..."
+            , local__msg_uart_index, sizeof(struct msg_header_t), data_size, try_count);
+
+        err_t ret = udp_sendto(bridge_config->udp_socket, send_pbuf, &send_address, send_port);
+        pbuf_free(send_pbuf);
+
+        if (ret != ESP_OK) {
+            ESP_LOGE(udp_TAG, "send msg failed - uart_index: %u; pkg_size: %u + %u - return %i"
+                , local__msg_uart_index, sizeof(struct msg_header_t), data_size, ret);
+
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            continue;
+        }
+
+        if (pdTRUE == xSemaphoreTake(sem__net2uart, 20 / portTICK_PERIOD_MS)) {
+            bridge_config_lock();
+            bridge_config->msg_uart_index++;
+            bridge_config_unlock();
+            break;
+        }
+
+        ESP_LOGI(udp_TAG, "send msg - uart_index: %u; msg_size: %u + %u, - not confirmed, try again!"
+            , local__msg_uart_index, sizeof(struct msg_header_t), data_size);
+
+        try_count++;
+    }
+
+    if (try_count < try_count_max) {
+
+        ESP_LOGI(udp_TAG, "sended msg confirmed - uart_index: %u; msg_size: %u + %u - try_count %i"
+            , local__msg_uart_index, sizeof(struct msg_header_t), data_size, try_count);
 
 #if CONFIG_IDF_TARGET_ESP8266
-    gpio_set_level(GPIO_NUM_2, 0);
+        gpio_set_level(GPIO_NUM_2, 1);
 #endif
+        return true;
+    }
+
+    ESP_LOGE(udp_TAG, "failed send msg - uart_index: %u the number of attempts (%u) has been exhausted."
+        , local__msg_uart_index, try_count_max);
+
+    return false;
 }

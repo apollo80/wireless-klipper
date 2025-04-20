@@ -1,8 +1,7 @@
 #!/usr/bin/python3
 
 import sys
-sys.path.append('/home/apollo/.platformio/penv/lib/python3.10/site-packages')
-sys.path.append('/home/apollo/.espressif/python_env/rtos3.4_py3.10_env/lib/python3.10/site-packages')
+sys.path.append('/home/apollo/.espressif/python_env/idf5.3_py3.12_env/lib/python3.12/site-packages')
 
 import asyncio
 import base64
@@ -18,31 +17,19 @@ import time
 from logging.handlers import RotatingFileHandler
 
 
-minPackSize = 6
-maxPackSize = 30
+minPackSize  = 6
+maxPackSize  = 70
+maxPackCount = 7
 
-tcp2serial_data = b''
+tcp2serial_data = bytes()
 tcp2serial_data_size = 0
-
-iteration_max = 10
-
-prefix_netStart     = 0x0A1B2C0D
-prefix_uartStart    = 0x0A2B3C0D
-
-prefix_netData      = 0x0A4B5C0D
-prefix_uartData     = 0x0A6B7C0D
-
-prefix_netConfirm   = 0x30405060
-prefix_uartConfirm  = 0x40506070
-
-prefix_recvMsgIndex_is_not_set = True
 
 
 class MCUProtocol(asyncio.Protocol):
     def __init__(self) -> None:
         super().__init__()
-        self.recv_data = b''
-        self.mcu_recvBytes = b''
+        self.recv_data = bytes()
+        self.mcu_recvBytes = bytes()
 
     def connection_made(self, transport):
         self.transport = transport
@@ -55,81 +42,73 @@ class MCUProtocol(asyncio.Protocol):
         global tcp2serial_data
         global tcp2serial_data_size
 
-        self.recv_data += data
+        if len(data) == 2 and len(self.recv_data) < tcp2serial_data_size :
+            tmp = self.recv_data + data
+            if tmp == tcp2serial_data[:len(tmp)]:
+                self.recv_data += data
+            else:
+                self.recv_data += bytes([ data[0] ])
+                test_logger.info('mcu: -- DEBUG: fix serial two bytes received')
+        else:
+            self.recv_data += data
+
         #test_logger.info("mcu: --> recv data {} (+{}) <--".format(len(self.recv_data), len(data)))
         #test_logger.info("mcu: --> {} <--".format(self.recv_data))
 
-        log_data = bytes()
-        is_log_message = True
-        while(is_log_message):
-            if len(self.recv_data) == 0:
-                return
+        while True:
+            log_start = self.recv_data.find(b'I (')
+            if log_start < 0:
+                log_start = self.recv_data.find(b'E (')
 
-            lines = self.recv_data.splitlines(keepends=True)
-            if not lines:
-                test_logger.info("mcu: --> not lines: {} <--".format(self.recv_data.hex(' ')))
-                self.recv_data = b''
-                return
+            if log_start < 0:
+                log_start = self.recv_data.find(b'W (')
 
-            if lines[0][:3] == b'I (' or lines[0][:3] == b'E (' or lines[0][:3] == b'W (':
-                #test_logger.info("mcu: -- last symbol {}".format(hex(lines[0][-1])))
-                if lines[0][-1] == 0x0a:
-                    test_logger.info("mcu: -- {}".format(lines[0][:-1].decode() ))
-                    self.recv_data = self.recv_data[len(lines[0]):]
-                else:
-                    #test_logger.info("mcu: --> {} <--".format(lines[0].decode()))
-                    #test_logger.info("mcu: -- need more")
-                    return
-            else:
-                if len(self.recv_data) < 5:
-                    return
-
-                if len(lines[0]) > tcp2serial_data_size:
-                    test_logger.info("mcu: recv data too big - checking")
-                    log_data = self.recv_data[tcp2serial_data_size:]
-                    self.recv_data = self.recv_data[:tcp2serial_data_size];
-                    test_logger.info("mcu: -- data[{}] - {}".format(len(self.recv_data), self.recv_data.hex(' ')))
-                    test_logger.info("mcu: -- logs after data:")
-                    test_logger.info("mcu: -- {}".format(log_data.decode()))
-
-                    #if (lines[0][tcp2serial_data_size:3] == b'I (') or (lines[0][tcp2serial_data_size:3] == b'E (') or (lines[0][tcp2serial_data_size:3] == b'W ('):
-
-                is_log_message = False
+            if log_start < 0:
                 break
 
-        test_logger.info('mcu: recv bytes[{}] (+{}) {}: '.format(len(self.recv_data), len(data), self.recv_data.hex(' ')))
+            log_end = self.recv_data.find(b'\n', log_start)
+            #test_logger.info("mcu: -- DEBUG: log_start {}, log_end {}, len(self.recv_data) {}".format(log_start, log_end, len(self.recv_data)))
+            if log_end < 0:
+                #log_msg = self.recv_data[log_start:]
+                #test_logger.info("mcu: Debug - is_not_ending - {}".format(log_msg.decode()))
+                return
+
+            log_msg = self.recv_data[log_start:log_end]
+            new_data = self.recv_data[:log_start] + self.recv_data[log_end+1:]
+            self.recv_data = new_data
+            test_logger.info("mcu: -- {}".format(log_msg.decode()))
+
+        if len(self.recv_data) < 4:
+            return
+
+        test_logger.info('mcu: -- recv  bytes[{}] - {}'.format(len(self.recv_data), self.recv_data.hex(' ')))
 
         if len(self.recv_data) < tcp2serial_data_size:
-            test_logger.info('mcu: wait {} bytes, received {} bytes -> need more'.format(tcp2serial_data_size, len(self.recv_data)))
+            test_logger.info('mcu: -- wait {} bytes, received {} bytes -> need more'.format(tcp2serial_data_size, len(self.recv_data)))
             #test_logger.info('mcu: ---')
             return
 
-        delay = random.randrange(2, 100)
-        time.sleep(delay / 1000)
+        if self.recv_data[:tcp2serial_data_size] != tcp2serial_data:
+            test_logger.info('mcu: data corrupted'.format())
+            test_logger.info('mcu:     generate {}'.format(tcp2serial_data.hex(' ')))
+            test_logger.info('mcu:     received {}'.format(self.recv_data[:tcp2serial_data_size].hex(' ')))
+            test_logger.info('mcu:     received {}'.format(self.recv_data.hex()))
+            test_logger.info('mcu:     received {}'.format(self.recv_data.decode()))
+            self.transport.loop.stop()
+            return
 
-        self.transport.write(self.recv_data)
-        test_logger.info('mcu: write back {} bytes'.format(len(self.recv_data)))
-        self.recv_data = b''
+        #delay = random.randrange(2, 100)
+        #time.sleep(delay / 1000)
 
-        if len(log_data):
-            test_logger.info('mcu: post log ...')
-            while(len(log_data)):
-                lines = log_data.splitlines(keepends=True)
-
-                if lines[0][:3] == b'I (' or lines[0][:3] == b'E (' or lines[0][:3] == b'W (':
-                    if lines[0][-1] == 0x0a:
-                        test_logger.info("mcu: -- {}".format(lines[0][:-1].decode() ))
-                        log_data = log_data[len(lines[0]):]
-                    else:
-                        self.recv_data = lines[0]
-                        test_logger.info("mcu: -- err1 {}".format(self.recv_data.hex(' ')))
-                        break;
-                else:
-                    self.recv_data = lines[0]
-                    test_logger.info("mcu: -- err2 {}".format(self.recv_data.hex(' ')))
-                    break;
+        write_data = self.recv_data[:tcp2serial_data_size]
+        self.transport.write(write_data)
+        test_logger.info('mcu: -- write bytes[{}] - {}'.format(len(write_data), write_data.hex(' ')))
+        self.recv_data = self.recv_data[tcp2serial_data_size:]
+        if len(self.recv_data):
+            test_logger.info('mcu: -- DEBUG: exist data [{}] {}'.format(len(self.recv_data), self.recv_data.decode()))
 
         test_logger.info('mcu: ---')
+
 
     def connection_lost(self, exc):
         test_logger.info('mcu: port closed')
@@ -147,9 +126,9 @@ class MCUProtocol(asyncio.Protocol):
 class SerialProtocol(asyncio.Protocol):
     def __init__(self) -> None:
         super().__init__()
-        self.recv_data = b''
+        self.recv_data = bytes()
         self.recv_data_size = 0
-        self.mcu_recvBytes = b''
+        self.mcu_recvBytes = bytes()
 
     def connection_made(self, transport):
         global tcp2serial_data
@@ -161,7 +140,7 @@ class SerialProtocol(asyncio.Protocol):
         ##transport.write(b'Hello, World!\n')  # Write serial data via transport
 
         test_logger.info("serial: generate new sequence".format(tcp2serial_data_size))
-        for idx in range (1, random.randrange(2, 4)):
+        for idx in range (1, random.randrange(2, maxPackCount)):
             inSeqSize = random.randrange(minPackSize, maxPackSize)
             inSeqBin = random.randbytes(inSeqSize)
 
@@ -199,7 +178,8 @@ class SerialProtocol(asyncio.Protocol):
 
         test_logger.info("serial: generate new sequence".format(tcp2serial_data_size))
         tcp2serial_data = bytes()
-        for idx in range (1, random.randrange(2, 5)):
+        pkg_count = random.randrange(2, maxPackCount)
+        for idx in range (1, pkg_count):
             inSeqSize = random.randrange(minPackSize, maxPackSize)
             inSeqBin = random.randbytes(inSeqSize)
 
@@ -208,14 +188,22 @@ class SerialProtocol(asyncio.Protocol):
             tmp[-1] = 0x7e
             tcp2serial_data += bytes(tmp)
             test_logger.info("serial:     {} pkg[{}] - {}".format(idx, len(tmp), tmp.hex(' ')))
+
+        if pkg_count % 2:
+            tmp =  bytes()
+            tmp += b'\x7e'
+            tmp += tcp2serial_data
+            tcp2serial_data = tmp
+
         tcp2serial_data_size = len(tcp2serial_data)
 
-        self.recv_data = b''
+        self.recv_data = bytes()
         self.recv_data_size = 0
 
         test_logger.info("serial: send msg {} bytes".format(tcp2serial_data_size))
         test_logger.info("serial: {}".format(tcp2serial_data.hex(' ')))
         self.transport.write(tcp2serial_data)
+        test_logger.info("serial: ---")
 
 
 
@@ -257,7 +245,7 @@ class GzipRotatingFileHandler(RotatingFileHandler):
         super(GzipRotatingFileHandler, self).doRollover()
 
         # Compress the old log.
-        for idx in range(10, 0, -1):
+        for idx in range(9, 0, -1):
             oldfilename = self.baseFilename + '.'+ str(idx) + '.gz'
             newfilename = self.baseFilename + '.'+ str(idx+1) + '.gz'
             if os.path.isfile(oldfilename):
@@ -276,11 +264,11 @@ class GzipRotatingFileHandler(RotatingFileHandler):
 
 
 # получение пользовательского логгера и установка уровня логирования
-test_logger = logging.getLogger(__name__)
+test_logger = logging.getLogger("test_serial.debug")
 test_logger.setLevel(logging.INFO)
 
 # настройка обработчика и форматировщика в соответствии с нашими нуждами
-test_handler = GzipRotatingFileHandler(f"{__name__}.log", mode='w', maxBytes=10*1024*1024, backupCount=5)
+test_handler = GzipRotatingFileHandler(f"test_serial.debug.log", mode='w', maxBytes=10*1024*1024, backupCount=5)
 test_formatter = logging.Formatter("%(asctime)s %(message)s")
 
 # добавление форматировщика к обработчику 
@@ -291,11 +279,11 @@ test_logger.addHandler(test_handler)
 
 test_logger.info(f"Testing the custom logger for module {__name__}...")
 
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
 #coro_mcu    = serial_asyncio.create_serial_connection(loop, MCUProtocol,    '/dev/ttyUSB0', baudrate=74880)
 #coro_serial = serial_asyncio.create_serial_connection(loop, SerialProtocol, '/home/apollo/virtual_pty', baudrate=250000)
 coro_mcu    = serial_asyncio.create_serial_connection(loop, MCUProtocol,    '/dev/ttyUSB0', baudrate=250000)
-coro_serial = serial_asyncio.create_serial_connection(loop, SerialProtocol, '/home/apollo/Development/github/apollo80/wireless-klipper/pty2udp-proxy/cmake-build-debug/mcu.virtual.serial', baudrate=460800)
+coro_serial = serial_asyncio.create_serial_connection(loop, SerialProtocol, '/tmp/virtual_pty', baudrate=250000)
 
 transport_ser, protocol_ser = loop.run_until_complete(coro_mcu)
 transport_soc, protocol_soc = loop.run_until_complete(coro_serial)

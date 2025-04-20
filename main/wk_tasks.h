@@ -15,14 +15,14 @@
 void wifi_init();
 void wifi_blink_start();
 
-// void mdns_start();
-// void mdns_stop();
+// TODO: void mdns_start();
+// TODO: void mdns_stop();
 
 void uart_init();
-void uart_reinit();
+void uart2net_start();
 
-void tcp2uart_start();
-void tcp2uart_stop();
+void net2uart_start();
+bool net2uart_is_started();
 
 
 /// @brief  

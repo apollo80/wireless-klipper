@@ -1,19 +1,46 @@
-idf_component_register(
-    SRCS
+## ESP8266
+if (${IDF_TARGET} STREQUAL "esp8266")
+    set(SOURCES
         app_main.c
-#        mdns.c
+        #        mdns.c
         webctrl.c
         wifi.c
         wk_bridge.c
         wk_bridge_uart2net.c
         wk_bridge_net2uart.c
         wk_settings.c
+        wk_udp_log.c
+    )
 
-    INCLUDE_DIRS
-        "./"
+    set(REQUIRES_COMPONENTS
+        app_update
+        esp8266
+        esp_http_server
+        freertos
+        log
+        lwip
+        nvs_flash
+        pthread
+        wpa_supplicant
+    )
+endif()
+
 
 ## ESP32C2
-    REQUIRES
+if (${IDF_TARGET} STREQUAL "esp32c2")
+    set(SOURCES
+        app_main.c
+        #        mdns.c
+        webctrl.c
+        wifi.c
+        wk_bridge.c
+        wk_bridge_uart2net.c
+        wk_bridge_net2uart.c
+        wk_settings.c
+        wk_udp_log.c
+    )
+
+    set(REQUIRES_COMPONENTS
         app_update
         driver
         esp_http_server
@@ -24,18 +51,12 @@ idf_component_register(
         nvs_flash
         pthread
         wpa_supplicant
+    )
+endif()
 
-## ESP8266
-#    REQUIRES
-#        app_update
-#        esp8266
-#        esp_http_server
-#        freertos
-#        log
-#        lwip
-#        nvs_flash
-#        pthread
-#        wpa_supplicant
-
-#LDFRAGMENTS
+## build target
+idf_component_register(
+        SRCS            ${SOURCES}
+        INCLUDE_DIRS    "./"
+        REQUIRES        ${REQUIRES_COMPONENTS}
     )

@@ -13,7 +13,9 @@
 #include <sdkconfig.h>
 #include <freertos/queue.h>
 
-#include <soc/uart_pins.h>
+#if CONFIG_IDF_TARGET_ESP32C2
+#   include <soc/uart_pins.h>
+#endif
 #include <driver/uart.h>
 #include "driver/gpio.h"
 
@@ -21,7 +23,7 @@
 #include <esp_log.h>
 
 
-static const char *TAG = "tcp2uart";
+static const char *TAG = "wk bridge";
 QueueHandle_t uart0_queue;
 
 static uart_config_t uart_config = {
@@ -32,7 +34,7 @@ static uart_config_t uart_config = {
     , .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE    /*!< UART HW flow control mode (cts/rts) */
 #if CONFIG_IDF_TARGET_ESP32C2
     , .source_clk = UART_SCLK_DEFAULT
-#else
+#elif CONFIG_IDF_TARGET_ESP8266
     , .rx_flow_ctrl_thresh = 122
 #endif
 };
@@ -40,6 +42,7 @@ static uart_config_t uart_config = {
 static struct bridge_config_t bridge_config;
 static SemaphoreHandle_t      bridge_config_mutex = NULL;
 
+void udp_recv_cb(void *arg, struct udp_pcb *pcb, struct pbuf *pbuf,const ip_addr_t *ip_addr, uint16_t port);
 void udp_session_done(TimerHandle_t timer_handle);
 
 void bridge_config_lock() {
@@ -60,105 +63,78 @@ void uart_init() {
     int rx_buffer_size = (int)(app_config()->uart_rx_buffer_size);
     int tx_buffer_size = rx_buffer_size;
 
-    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, rx_buffer_size, tx_buffer_size, 20, &uart0_queue, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uart_config));
+    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, rx_buffer_size, tx_buffer_size, 128, &uart0_queue, 0));
+
 #if CONFIG_IDF_TARGET_ESP32C2
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, U0TXD_GPIO_NUM, U0RXD_GPIO_NUM, U0RTS_GPIO_NUM, U0CTS_GPIO_NUM));
     ESP_ERROR_CHECK(uart_set_mode(UART_NUM_0, UART_MODE_UART));
 #endif
 }
 
-void uart_reinit() {
-    ESP_ERROR_CHECK(uart_driver_delete(UART_NUM_0));
-    uart_init();
+void uart2net_start() {
+    // create UART task
+    xTaskCreate(task_uart2net, "uart2net_task", 2048, &bridge_config, 6, &(bridge_config.task__uart2net));
+    configASSERT(bridge_config.task__uart2net);
 }
 
-
-void tcp2uart_start() {
-    ESP_LOGI(TAG, "tcp2uart start");
-
+void net2uart_start() {
     if (bridge_config_mutex == NULL) {
         bridge_config_mutex = xSemaphoreCreateMutex();
     }
 
     bridge_config.app_config = app_config();
-    bridge_config.socket = -1;
 
-    bridge_config.source_address_len = sizeof(bridge_config.source_address);
-    memset(&(bridge_config.source_address), 0, bridge_config.source_address_len);
-
-    bridge_config.net_rx_buffer  = (uint8_t *) malloc(bridge_config.app_config->net_rx_buffer_size);
     bridge_config.uart_rx_buffer = (uint8_t *) malloc(bridge_config.app_config->uart_rx_buffer_size);
+    bridge_config.send_buffer    = (uint8_t *) malloc(bridge_config.app_config->uart_rx_buffer_size
+            + sizeof(struct msg_header_t) + sizeof(uint16_t));
 
     bridge_config.msg_net_index  = 0;
     bridge_config.msg_uart_index = 0;
 
-    bridge_config.timer__session = xTimerCreate("udp_session", 10000 / portTICK_PERIOD_MS, true, NULL, udp_session_done);
-
-    bridge_config.task__net2uart = NULL;
+    bridge_config.timer__session = xTimerCreate("udp_session", 4000 / portTICK_PERIOD_MS, true, NULL, udp_session_done);
+    bridge_config.task__uart2net = NULL;
     bridge_config.sem__net2uart  = xSemaphoreCreateBinary();
 
-    bridge_config.task__uart2net = NULL;
-    bridge_config.sem__uart2net  = xSemaphoreCreateBinary();
+    bridge_config.udp_socket = udp_new();
+    if (!bridge_config.udp_socket) {
+        ESP_LOGE(TAG, "failed create udp socket - no memory");
+        return;
+    }
+#if CONFIG_IDF_TARGET_ESP32C2
+    bridge_config.source_address.addr = 0;
+#elif CONFIG_IDF_TARGET_ESP8266
+    bridge_config.source_address.u_addr.ip4.addr = 0;
+#else
+#error Unknown IDF_TARGET
+#endif
+    bridge_config.source_port = 0;
 
-    xTaskCreate(bridge_net2uart, "net2uart", 2048, &bridge_config, 5, &(bridge_config.task__net2uart));
+    err_t ret = udp_bind(bridge_config.udp_socket, IP4_ADDR_ANY, bridge_config.app_config->net_port);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "failed bind udp socket: ret %i", ret);
+        return;
+    }
+    udp_recv(bridge_config.udp_socket, udp_recv_cb, &bridge_config);
 }
 
-void tcp2uart_stop() {
-    ESP_LOGI(TAG, "tcp2uart stop");
-
-    if (bridge_config.task__uart2net) {
-        vTaskDelete(bridge_config.task__uart2net);
-        bridge_config.task__uart2net = NULL;
-    }
-
-    if (bridge_config.task__net2uart) {
-        vTaskDelete(bridge_config.task__net2uart);
-        bridge_config.task__net2uart = NULL;
-    }
-
-    if (bridge_config.net_rx_buffer) {
-        free(bridge_config.net_rx_buffer);
-        bridge_config.net_rx_buffer = NULL;
-    }
-
-    if (bridge_config.uart_rx_buffer) {
-        free(bridge_config.uart_rx_buffer);
-        bridge_config.uart_rx_buffer = NULL;
-    }
-
-    // bridge_config.net_session_started = false;
-
-    if (bridge_config.timer__session) {
-        xTimerDelete(bridge_config.timer__session, 0);
-    }
-
-    if (bridge_config.sem__net2uart) {
-        vSemaphoreDelete(bridge_config.sem__net2uart);
-        bridge_config.sem__net2uart = NULL;
-    }
-
-    if (bridge_config.sem__uart2net) {
-        vSemaphoreDelete(bridge_config.sem__uart2net);
-        bridge_config.sem__uart2net = NULL;
-    }
-
-    gpio_set_level(GPIO_NUM_2, 1);
-    if (bridge_config_mutex) {
-        vSemaphoreDelete(bridge_config_mutex);
-        bridge_config_mutex = NULL;
-    }
+bool net2uart_is_started() {
+    return (bridge_config.udp_socket != NULL);
 }
+
 
 void udp_session_done(TimerHandle_t timer_handle)
 {
     ESP_LOGI(TAG, "!! udp_session_done !!");
 
-    bridge_uart2net__stop(&bridge_config);
+    // ??? -> bridge_uart2net__stop(&bridge_config);
+    webctrl_start();
 
 #if CONFIG_IDF_TARGET_ESP8266
     gpio_set_level(GPIO_NUM_2, 1);
 #endif
+
+    xTimerStop(bridge_config.timer__session, 10);
 }
 
 #if CONFIG_WK_UDP_LOG_ENABLE
@@ -168,7 +144,7 @@ void udp_log(int udp_socket, struct sockaddr_in* dest_addr, const char* format, 
     static char*   udp_message_buf = (char*)(udp_message + sizeof(struct msg_header_t));
     static struct  msg_header_t* log_msg_header = (struct msg_header_t *) (udp_message);
 
-    log_msg_header->msg_prefix = htonl(prefix_udpLog);
+    log_msg_header->msg_prefix = prefix_udpLog;
     log_msg_header->uart_index = 0;
     log_msg_header->net_index = 0;
     log_msg_header->msg_size = 0;
@@ -180,7 +156,7 @@ void udp_log(int udp_socket, struct sockaddr_in* dest_addr, const char* format, 
         msg_size = vsnprintf(udp_message_buf, 1024, format, args);
         va_end(args);
     }
-    log_msg_header->msg_size = htonl(msg_size);
+    log_msg_header->msg_size = htons(msg_size);
 
     bridge_config_lock();
     ssize_t sent_bytes = 0;
@@ -196,6 +172,5 @@ void udp_log(int udp_socket, struct sockaddr_in* dest_addr, const char* format, 
         return;
     }
     assert(sent_bytes == (sizeof(struct  msg_header_t) + msg_size));
-    // ESP_LOGI(TAG, "Message sent");
 }
 #endif

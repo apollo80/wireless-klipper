@@ -20,35 +20,40 @@ struct settings_t moduleSettings = {
             .major      = 0
             , .minor    = 0
             , .revision = 3
-            , .bugfix   = 1
+            , .bugfix   = 14
         }
     }
-
+#if CONFIG_IDF_TARGET_ESP32C2
     /// @brief wifi point name
-    , .wifi_hostname = "esp23c2"
+    , .wifi_hostname = "esp32c2"
+#elif CONFIG_IDF_TARGET_ESP8266
+    /// @brief wifi point name
+    , .wifi_hostname = "esp8266"
+#endif
 
     /// @brief wifi mode
     , .wifi_use_sta = true
 
     /// @brief wifi SSID
-    , .wifi_ssid = "mks robin wifi"
+    , .wifi_ssid = "klipper-x96" //, .wifi_ssid = "mks robin wifi"
 
     /// @brief wifi password
-    , .wifi_password = "password"
+    , .wifi_password = "esp8266-klipper"  // , .wifi_password = "password"
 
 
     /// @brief speed of serial port
     , .uart_baud_rate = 250000
+    // , .uart_baud_rate = 74880
 
     /// @brief serial port buffer size for receiving data
-    , .uart_rx_buffer_size = 1024
+    , .uart_rx_buffer_size = 512
 
 
     /// @brief port of tcp2serial server
     , .net_port = 8888
 
     /// @brief buffer size for receiving data
-    , .net_rx_buffer_size = 1024
+    , .net_rx_buffer_size = 512
 
     /// @brief Sign of using static network addressing
     , .use_static_ip = false
@@ -132,13 +137,13 @@ void app_config_read()
     nvs_err = nvs_get_u32(out_handle, "uart_baud_rate",      &(moduleSettings.uart_baud_rate));
     need_update_config |= (nvs_err != ESP_OK);
 
-    nvs_err = nvs_get_u32(out_handle, "uart_rx_buffer_size", &(moduleSettings.uart_rx_buffer_size));
+    nvs_err = nvs_get_u16(out_handle, "uart_rx_buffer_size", &(moduleSettings.uart_rx_buffer_size));
     need_update_config |= (nvs_err != ESP_OK);
 
     nvs_err = nvs_get_u16(out_handle, "udp_port",            &(moduleSettings.net_port));
     need_update_config |= (nvs_err != ESP_OK);
 
-    nvs_err = nvs_get_u32(out_handle, "udp_rx_buffer_size",  &(moduleSettings.net_rx_buffer_size));
+    nvs_err = nvs_get_u16(out_handle, "udp_rx_buffer_size",  &(moduleSettings.net_rx_buffer_size));
     need_update_config |= (nvs_err != ESP_OK);
 
     nvs_close(out_handle);
@@ -166,10 +171,10 @@ void app_config_write()
     nvs_err = nvs_set_str(out_handle, "wifi_password",       moduleSettings.wifi_password);
 
     nvs_err = nvs_set_u32(out_handle, "uart_baud_rate",      moduleSettings.uart_baud_rate);
-    nvs_err = nvs_set_u32(out_handle, "uart_rx_buffer_size", moduleSettings.uart_rx_buffer_size);
+    nvs_err = nvs_set_u16(out_handle, "uart_rx_buffer_size", moduleSettings.uart_rx_buffer_size);
 
     nvs_err = nvs_set_u16(out_handle, "udp_port",            moduleSettings.net_port);
-    nvs_err = nvs_set_u32(out_handle, "udp_rx_buffer_size",  moduleSettings.net_rx_buffer_size);
+    nvs_err = nvs_set_u16(out_handle, "udp_rx_buffer_size",  moduleSettings.net_rx_buffer_size);
 
     nvs_err = ESP_OK;
     nvs_close(out_handle);

@@ -27,16 +27,16 @@ tcp2serial_data_size = 0
 
 iteration_max = 10
 
-prefix_netStart     = 0x0A1B2C0D
-prefix_uartStart    = 0x0A2B3C0D
+#prefix_netStart     = 0x01
+#prefix_uartStart    = 0x02
 
-prefix_netData      = 0x0A4B5C0D
-prefix_uartData     = 0x0A6B7C0D
+#prefix_netData      = 0x03
+#prefix_uartData     = 0x04
 
-prefix_netConfirm   = 0x30405060
-prefix_uartConfirm  = 0x40506070
+#prefix_netConfirm   = 0x05
+#prefix_uartConfirm  = 0x06
 
-prefix_recvMsgIndex_is_not_set = True
+#prefix_recvMsgIndex_is_not_set = True
 
 
 class MCUProtocol(asyncio.Protocol):
